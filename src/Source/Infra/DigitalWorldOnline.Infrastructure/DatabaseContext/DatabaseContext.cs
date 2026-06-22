@@ -26,7 +26,7 @@ namespace DigitalWorldOnline.Infrastructure
             if (!optionsBuilder.IsConfigured)
             {
                 var connectionString = _configuration?.GetConnectionString("Default")
-                    ?? "Server=38.143.19.42,1433;Database=dmo;User Id=sa;Password=teste12!;Encrypt=False;TrustServerCertificate=True;Pooling=true;Min Pool Size=50;Max Pool Size=1000;Connection Lifetime=180;";
+                    ?? "Server=localhost;Database=dmo;Trusted_Connection=True;TrustServerCertificate=True;Encrypt=False;";
 
                 optionsBuilder.UseSqlServer(connectionString, sqlServerOptions =>
                 {
