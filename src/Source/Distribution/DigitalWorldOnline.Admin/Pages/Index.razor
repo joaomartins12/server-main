@@ -1,0 +1,139 @@
+﻿@page "/"
+@using DigitalWorldOnline.Commons.Enums
+@using DigitalWorldOnline.Commons.Models
+
+<MudPaper Style="padding: 18px; margin-top: 15px;">
+    <MudText>Home</MudText>
+</MudPaper>
+
+<Loader Loading="@Loading">
+    <MudPaper Style="padding: 25px; margin-top: 15px; margin-bottom:5px; height: auto; min-height: 440px;">
+
+        <MudExpansionPanels DisableBorders="true" Elevation="2" Style="padding-bottom:15px">
+
+            <!-- Server Status -->
+            <MudExpansionPanel IsInitiallyExpanded>
+                <TitleContent>
+                    <MudStack Row="true" Spacing="2">
+                        <MudText>Server Status</MudText>
+                    </MudStack>
+                </TitleContent>
+                <ChildContent>
+                    <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+                        <MudIcon Icon="@Icons.Material.Filled.Group" Color="Color.Primary" />
+                        <MudText Typo="Typo.body1">
+                            Online Players - (@OnlinePlayers/@MaxPlayers)
+                        </MudText>
+                    </MudStack>
+                </ChildContent>
+            </MudExpansionPanel>
+
+            <!-- GM Commands -->
+            <MudExpansionPanel>
+                <TitleContent>
+                    <MudStack Row="true" Spacing="2">
+                        <MudText>Game Master Commands</MudText>
+                    </MudStack>
+                </TitleContent>
+                <ChildContent>
+                    <MudCard Elevation="0">
+                        <MudText><b>!</b> - Command identifier</MudText>
+                        <MudText><b>{ }</b> - Required value</MudText>
+                        <MudText><b>[ ]</b> - Optional value</MudText>
+
+                        <MudList>
+                            <!-- Inventory -->
+                            <MudListItem Icon="@Icons.Material.Filled.LabelImportant" Text="Inventory" Style="cursor: pointer;">
+                                <NestedList>
+                                    <MudTooltip Text="Increase your inventory slots." Arrow="true" Placement="Placement.Top">
+                                        <MudListItem Text="!inv add {amount}" />
+                                    </MudTooltip>
+                                    <MudTooltip Text="Remove all items from your inventory." Arrow="true" Placement="Placement.Top">
+                                        <MudListItem Text="!inv clear" />
+                                    </MudTooltip>
+                                </NestedList>
+                            </MudListItem>
+
+                            <!-- Items -->
+                            <MudListItem Icon="@Icons.Material.Filled.LabelImportant" Text="Items" Style="cursor: pointer;">
+                                <NestedList>
+                                    <MudTooltip Text="Adds an item to your inventory. Default amount is 1." Arrow="true" Placement="Placement.Top">
+                                        <MudListItem Text="!item {id} [amount]" />
+                                    </MudTooltip>
+                                </NestedList>
+                            </MudListItem>
+
+                            <!-- Currency -->
+                            <MudListItem Icon="@Icons.Material.Filled.LabelImportant" Text="Currency" Style="cursor: pointer;">
+                                <NestedList>
+                                    <MudListItem Text="!currency bits {value}" />
+                                    <MudListItem Text="!currency premium {value}" />
+                                    <MudListItem Text="!currency silk {value}" />
+                                </NestedList>
+                            </MudListItem>
+
+                            <!-- Movement -->
+                            <MudListItem Icon="@Icons.Material.Filled.LabelImportant" Text="Movement" Style="cursor: pointer;">
+                                <NestedList>
+                                    <MudListItem Text="!tp {mapid} [region]" />
+                                    <MudListItem Text="!pos" />
+                                    <MudListItem Text="!where" />
+                                    <MudListItem Text="!location" />
+                                    <MudListItem Text="!position" />
+                                    <MudListItem Text="!tpto {playerName}" />
+                                </NestedList>
+                            </MudListItem>
+
+                            <!-- Events -->
+                            <MudListItem Icon="@Icons.Material.Filled.LabelImportant" Text="Events" Style="cursor: pointer;">
+                                <NestedList>
+                                    <MudListItem Text="!buff area {code}" />
+                                </NestedList>
+                            </MudListItem>
+
+                            <!-- Tamer -->
+                            <MudListItem Icon="@Icons.Material.Filled.LabelImportant" Text="Tamer" Style="cursor: pointer;">
+                                <NestedList>
+                                    <MudListItem Text="!tamer exp add {value}" />
+                                    <MudListItem Text="!tamer exp max" />
+                                    <MudListItem Text="!tamer size {value}" />
+                                    <MudListItem Text="!openseals" />
+                                </NestedList>
+                            </MudListItem>
+
+                            <!-- Digimon -->
+                            <MudListItem Icon="@Icons.Material.Filled.LabelImportant" Text="Digimon" Style="cursor: pointer;">
+                                <NestedList>
+                                    <MudListItem Text="!digimon exp add {value}" />
+                                    <MudListItem Text="!digimon exp max" />
+                                    <MudListItem Text="!digimon size {value}" />
+                                    <MudListItem Text="!unlockevos" />
+                                </NestedList>
+                            </MudListItem>
+
+                            <!-- Communication -->
+                            <MudListItem Icon="@Icons.Material.Filled.LabelImportant" Text="Communication" Style="cursor: pointer;">
+                                <NestedList>
+                                    <MudListItem Text="!notice {message}" />
+                                </NestedList>
+                            </MudListItem>
+
+                            <!-- Misc -->
+                            <MudListItem Icon="@Icons.Material.Filled.LabelImportant" Text="Miscellaneous" Style="cursor: pointer;">
+                                <NestedList>
+                                    <MudListItem Text="!hide" />
+                                    <MudListItem Text="!show" />
+                                    <MudListItem Text="!godmode {on}" />
+                                    <MudListItem Text="!godmode {off}" />
+                                    <MudListItem Text="!reload" />
+                                    <MudListItem Text="!maintenance" />
+                                </NestedList>
+                            </MudListItem>
+                        </MudList>
+                    </MudCard>
+                </ChildContent>
+            </MudExpansionPanel>
+
+        </MudExpansionPanels>
+    </MudPaper>
+</Loader>

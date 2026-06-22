@@ -1,0 +1,77 @@
+﻿@page "/globaldrops"
+@attribute [Authorize(Roles = "Administrator, GameMaster")]
+
+@using DigitalWorldOnline.Commons.Enums;
+@using DigitalWorldOnline.Commons.ViewModel.GlobalDrops;
+
+<PageTitle>DMO - Admin</PageTitle>
+
+<MudTable FixedHeader="true"
+    FixedFooter="false"
+          ServerData="@(new Func<TableState, Task<TableData<GlobalDropsViewModel>>>(ServerReload))"
+    Hover="true"
+    SortLabel="Order by"
+    Loading="true"
+    @ref="_table"
+    Elevation="2">
+    <ToolBarContent>
+        <MudStack Row="true" Spacing="2">
+            <MudIcon Icon="@Icons.Material.Filled.Egg" Class="icon-title"></MudIcon>
+            <MudText Typo="Typo.h5"><b>GlobalDrops Configs</b></MudText>
+        </MudStack>
+        <MudSpacer />
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Create">New GlobalDrops config</MudButton>
+    </ToolBarContent>
+    <HeaderContent>
+        <MudTh>
+            <MudTableSortLabel SortLabel="ItemId" T="GlobalDropsViewModel"><b>ItemId</b></MudTableSortLabel>
+        </MudTh>
+        <MudTh>
+            <MudTableSortLabel SortLabel="MinDrop" T="GlobalDropsViewModel"><b>MinDrop</b></MudTableSortLabel>
+        </MudTh>
+        <MudTh>
+            <MudTableSortLabel SortLabel="MaxDrop" T="GlobalDropsViewModel"><b>MaxDrop</b></MudTableSortLabel>
+        </MudTh>
+        <MudTh>
+            <MudTableSortLabel SortLabel="Chance" T="GlobalDropsViewModel"><b>Chance</b></MudTableSortLabel>
+        </MudTh>
+        <MudTh>
+            <MudTableSortLabel SortLabel="Map" T="GlobalDropsViewModel"><b>Map</b></MudTableSortLabel>
+        </MudTh>
+        <MudTh>
+            <MudTableSortLabel SortLabel="StartTime" T="GlobalDropsViewModel"><b>StartTime</b></MudTableSortLabel>
+        </MudTh>
+        <MudTh>
+            <MudTableSortLabel SortLabel="EndTime" T="GlobalDropsViewModel"><b>EndTime</b></MudTableSortLabel>
+        </MudTh>
+        <MudTh>
+            <MudTableSortLabel Enabled="false" T="GlobalDropsViewModel"><b>Actions</b></MudTableSortLabel>
+        </MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="ItemId">@context.ItemId</MudTd>
+        <MudTd DataLabel="MinDrop">@context.MinDrop</MudTd>
+        <MudTd DataLabel="MaxDrop">@context.MaxDrop</MudTd>
+        <MudTd DataLabel="Chance">@context.Chance</MudTd>
+        <MudTd DataLabel="Map">@context.Map</MudTd>
+        <MudTd DataLabel="StartTime">@context.StartTime</MudTd>
+        <MudTd DataLabel="EndTime">@context.EndTime</MudTd>
+        <MudTd>
+            <MudIconButton Icon="@Icons.Material.Filled.Edit" OnClick="@(() => Update(context.Id))" Title="Update" Size="Size.Small"></MudIconButton>
+            <MudIconButton Icon="@Icons.Material.Filled.Delete" OnClick="@(() => Delete(context.Id))" Title="Delete" Size="Size.Small"></MudIconButton>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText>No data found.</MudText>
+    </NoRecordsContent>
+    <LoadingContent>
+        <MudText>Agumon is bringing the data, wait a second...</MudText>
+    </LoadingContent>
+    <PagerContent>
+        <MudTablePager 
+            InfoFormat="Showing {first_item}-{last_item} of {all_items}"
+            PageSizeOptions="new int[]{10, 10, 10, 10, 10, 50, 50}"
+            HorizontalAlignment="HorizontalAlignment.Center"
+            RowsPerPageString="Rows per page:" />
+    </PagerContent>
+</MudTable>

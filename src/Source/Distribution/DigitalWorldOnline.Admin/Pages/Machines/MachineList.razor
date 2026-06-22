@@ -1,0 +1,59 @@
+@page "/machines"
+@using DigitalWorldOnline.Commons.DTOs.Assets
+@using MudBlazor
+@inherits DigitalWorldOnline.Admin.Pages.Machines.MachinesBase
+
+<PageTitle>Machines</PageTitle>
+
+<MudPaper Style="padding: 20px; margin-top: 15px;">
+    <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Class="mb-4">
+        <MudIcon Icon="@Icons.Material.Filled.List" Size="Size.Large" Color="Color.Primary" />
+        <MudText Typo="Typo.h4">Gotcha Machines</MudText>
+    </MudStack>
+
+    @if (Loading)
+    {
+        <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+    }
+    else if (GotchaMachines == null || GotchaMachines.Count == 0)
+    {
+        <MudAlert Severity="Severity.Warning">No Gotchas found.</MudAlert>
+    }
+    else
+    {
+        <MudTable Items="@GotchaMachines" Hover="true">
+            <HeaderContent>
+                <MudTh>ID</MudTh>
+                <MudTh>Gotcha ID</MudTh>
+                <MudTh>NPC ID</MudTh>
+                <MudTh>Use Item</MudTh>
+                <MudTh>Use Count</MudTh>
+                <MudTh>Min Lv</MudTh>
+                <MudTh>Max Lv</MudTh>
+                <MudTh>Rare Item Count</MudTh>
+                <MudTh>Chance</MudTh>
+                <MudTh>Actions</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="ID">@context.Id</MudTd>
+                <MudTd DataLabel="Gotcha ID">@context.GotchaId</MudTd>
+                <MudTd DataLabel="NPC ID">@context.NpcId</MudTd>
+                <MudTd DataLabel="Use Item">@context.UseItem</MudTd>
+                <MudTd DataLabel="Use Count">@context.UseCount</MudTd>
+                <MudTd DataLabel="Min Lv">@context.MinLv</MudTd>
+                <MudTd DataLabel="Max Lv">@context.MaxLv</MudTd>
+                <MudTd DataLabel="Rare Item Count">@context.RareItemCnt</MudTd>
+                <MudTd DataLabel="Chance">@context.Chance</MudTd>
+                <MudTd>
+                    <MudButton Variant="Variant.Outlined"
+                               Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Edit"
+                               Color="Color.Primary"
+                               OnClick="@(() => Navigation.NavigateTo($"/machines/edit/{context.Id}"))">
+                        Edit
+                    </MudButton>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+</MudPaper>

@@ -1,0 +1,33 @@
+﻿<style>
+    .loader {
+        position: relative;
+    }
+
+    .loader-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+</style>
+
+<div class="loader">
+    <MudOverlay Visible="@Loading" DarkBackground="true" AutoClose="false" Class="loader-overlay">
+        <div style="text-align:center">
+            <MudProgressCircular Indeterminate="true" />
+            @if (!string.IsNullOrWhiteSpace(Message))
+            {
+                <MudText Typo="Typo.body2" Class="mt-2">@Message</MudText>
+            }
+        </div>
+    </MudOverlay>
+
+    @ChildContent
+</div>
+
+@code {
+    [Parameter] public bool Loading { get; set; }
+    [Parameter] public string? Message { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

@@ -1,0 +1,107 @@
+﻿@page "/globaldrops/update/{GlobalDropId}"
+@attribute [Authorize(Roles = "Administrator, GameMaster")]
+
+@using DigitalWorldOnline.Commons.Enums;
+@using DigitalWorldOnline.Commons.ViewModel.Asset;
+
+<MudPaper Style="overflow-x: hidden;
+        padding: 20px;
+        margin-top: 15px;">
+    <Loader Loading="@Loading">
+        <EditForm Model="@_globaldrops" OnValidSubmit="Update">
+            <MudGrid>
+                <MudItem xs="12" xl="12" sm="12">
+                    <MudStack Row="true" Spacing="2">
+                        <MudIcon Icon="@Icons.Material.Filled.CatchingPokemon" Class="icon-title"></MudIcon>
+                        <MudText Typo="Typo.h5"><b>Update GlobalDrops config</b></MudText>
+                    </MudStack>
+                </MudItem>
+
+                <MudItem xs="6" xl="6" sm="6">
+                    <MudNumericField @bind-Value="_globaldrops.ItemId"
+                                     For="@(() => _globaldrops.ItemId)"
+                                     Label="ItemId"
+                                     T="int"
+                                     Variant="Variant.Outlined"
+                                     Required
+                                     RequiredError="Required"
+                                     Min="1"
+                                     Max="100000" />
+                </MudItem>
+
+                <MudItem xs="6" xl="6" sm="6">
+                    <MudNumericField @bind-Value="_globaldrops.MinDrop"
+                                     For="@(() => _globaldrops.MinDrop)"
+                                     Label="MinDrop"
+                                     T="byte"
+                                     Variant="Variant.Outlined"
+                                     Required
+                                     RequiredError="Required"
+                                     Min="0"
+                                     Max="100" />
+                </MudItem>
+
+                <MudItem xs="6" xl="6" sm="6">
+                    <MudNumericField @bind-Value="_globaldrops.MaxDrop"
+                                     For="@(() => _globaldrops.MaxDrop)"
+                                     Label="MaxDrop"
+                                     T="byte"
+                                     Variant="Variant.Outlined"
+                                     Required
+                                     RequiredError="Required"
+                                     Min="0"
+                                     Max="100" />
+                </MudItem>
+
+                <MudItem xs="6" xl="6" sm="6">
+                    <MudNumericField @bind-Value="_globaldrops.Chance"
+                                     For="@(() => _globaldrops.Chance)"
+                                     Label="Chance"
+                                     T="double"
+                                     Variant="Variant.Outlined"
+                                     Required
+                                     RequiredError="Required"
+                                     Min="0"
+                                     Max="100" />
+                </MudItem>
+
+                <MudItem xs="6" xl="6" sm="6">
+                    <MudTextField @bind-Value="_globaldrops.Map"
+                                  For="@(() => _globaldrops.Map)"
+                                  Label="Map"
+                                  Variant="Variant.Outlined"
+                                  Required
+                                  RequiredError="Required" />
+                </MudItem>
+
+                <MudItem xs="6" xl="6" sm="6">
+                    <MudDatePicker @bind-Date="_globaldrops.StartTime"
+                                   For="@(() => _globaldrops.StartTime)"
+                                   Label="StartTime"
+                                   Variant="Variant.Outlined"
+                                   Required
+                                   RequiredError="Required" />
+                </MudItem>
+
+                <MudItem xs="6" xl="6" sm="6">
+                    <MudDatePicker @bind-Date="_globaldrops.EndTime"
+                                   For="@(() => _globaldrops.EndTime)"
+                                   Label="EndTime"
+                                   Variant="Variant.Outlined"
+                                   Required
+                                   RequiredError="Required" />
+                </MudItem>
+
+                <MudItem xs="12" xl="12" sm="12">
+                </MudItem>
+
+                <MudItem xs="12" xl="12" sm="12">
+                    <MudStack Row="true" Spacing="2">
+                        <MudButton Color="Color.Primary" Variant="Variant.Filled" ButtonType="ButtonType.Submit">Save changes</MudButton>
+                        <MudButton Color="Color.Inherit" Variant="Variant.Filled" ButtonType="ButtonType.Button" OnClick="Return">Return</MudButton>
+                    </MudStack>
+                </MudItem>
+            </MudGrid>
+        </EditForm>
+    </Loader>
+</MudPaper>
