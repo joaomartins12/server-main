@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using DigitalWorldOnline.Application;
+﻿using DigitalWorldOnline.Application;
 using DigitalWorldOnline.Commons.Entities;
 using DigitalWorldOnline.Commons.Enums.PacketProcessor;
 using DigitalWorldOnline.Commons.Interfaces;
@@ -29,59 +25,44 @@ namespace DigitalWorldOnline.Game
             _logger = logger;
         }
 
+        /// <summary>
+        /// Process the arrived TCP packet, sent from the game client
+        /// </summary>
+        /// <param name="client">The game client whos sent the packet</param>
+        /// <param name="data">The packet bytes array</param>
         public async Task ProcessPacketAsync(GameClient client, byte[] data)
         {
-            while (_assets.Loading || _configs.Loading)
-                await Task.Delay(1000);
+            while (_assets.Loading || _configs.Loading) await Task.Delay(1000);
 
             var packet = new GamePacketReader(data);
 
             switch (packet.Enum)
             {
                 case GameServerPacketEnum.Unknown:
-                    break;
-
-                // PartnerStop é processado como qualquer outro
-                case GameServerPacketEnum.PartnerStop:
-                    DispatchPacket(client, packet.Enum, data);
-                    break;
-
-                // Attack e Skill sempre processam na hora
-                case GameServerPacketEnum.PartnerAttack:
-                case GameServerPacketEnum.PartnerSkill:
-                    DispatchPacket(client, packet.Enum, data);
+                    _logger.Warning($"Unknown packet. Type: {packet.Type}. Length: {packet.Length}.");
                     break;
 
                 default:
-                    DispatchPacket(client, packet.Enum, data);
+                    {
+                        var processor = _packetProcessors.FirstOrDefault(x => x.Type == packet.Enum);
+
+                        if (processor != null)
+                        {
+                            await processor.Process(client, data);
+                        }
+                        else
+                        {
+                            _logger.Error($"No processor for packet {packet.Type} to player {client.Tamer.Name}.");
+                            //throw new NotImplementedException();
+                        }
+                    }
                     break;
             }
         }
 
-        private void DispatchPacket(GameClient client, GameServerPacketEnum type, byte[] data)
-        {
-            var processor = _packetProcessors.FirstOrDefault(x => x.Type == type);
-
-            if (processor != null)
-            {
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        await processor.Process(client, data);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.Error(ex, $"Erro ao processar packet {type} para {client.Tamer?.Name ?? "Unknown"}.");
-                    }
-                });
-            }
-            else
-            {
-                _logger.Error($"No processor for packet {type} to player {client.Tamer?.Name ?? "Unknown"}.");
-            }
-        }
-
+        /// <summary>
+        /// Disposes the entire object.
+        /// </summary>
         public void Dispose()
         {
             GC.SuppressFinalize(this);

@@ -6,6 +6,7 @@ using DigitalWorldOnline.Commons.Models.Map;
 using DigitalWorldOnline.Game.Managers;
 using DigitalWorldOnline.Infrastructure;
 using MediatR;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 
@@ -22,7 +23,7 @@ namespace DigitalWorldOnline.GameHost
         private readonly ILogger _logger;
         private readonly ISender _sender;
         private readonly IMapper _mapper;
-        private readonly IServiceProvider _serviceProvider;
+        private readonly IServiceScopeFactory _scopeFactory; // ✅ substitui IServiceProvider
         private readonly EventManager _eventManager;
 
         public List<GameMap> Maps { get; set; }
@@ -37,7 +38,7 @@ namespace DigitalWorldOnline.GameHost
             ILogger logger,
             ISender sender,
             IMapper mapper,
-            IServiceProvider serviceProvider,
+            IServiceScopeFactory scopeFactory, // ✅ injeta ScopeFactory
             EventManager eventManager)
         {
             _partyManager = partyManager;
@@ -49,11 +50,10 @@ namespace DigitalWorldOnline.GameHost
             _logger = logger;
             _sender = sender;
             _mapper = mapper;
-            _serviceProvider = serviceProvider;
+            _scopeFactory = scopeFactory; // ✅ inicializa corretamente
             _eventManager = eventManager;
 
             Maps = new List<GameMap>();
         }
-
     }
 }

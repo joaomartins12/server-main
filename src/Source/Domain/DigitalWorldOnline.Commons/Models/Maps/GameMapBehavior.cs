@@ -287,7 +287,7 @@ namespace DigitalWorldOnline.Commons.Models.Map
 
             WithoutTamers = DateTime.MaxValue;
 
-            var maxAttempts = 20; // Limite de tentativas  
+            var maxAttempts = 40; // Limite de tentativas  
             var attempts = 0;
 
             // Melhorar o desempenho reduzindo o tempo de espera e verificando condições antes de entrar no loop  
@@ -299,7 +299,7 @@ namespace DigitalWorldOnline.Commons.Models.Map
 
             while (NeedNewHandler(client.Tamer.Id) && attempts < maxAttempts)
             {
-                await Task.Delay(200); // Reduzir o tempo de espera para melhorar a responsividade  
+                await Task.Delay(150); // Reduzir o tempo de espera para melhorar a responsividade  
                 attempts++;
             }
 

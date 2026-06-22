@@ -1217,9 +1217,9 @@ namespace DigitalWorldOnline.GameHost
             {
                 Commons.Enums.Account.AccountAccessLevelEnum.Vip => 1,
                 Commons.Enums.Account.AccountAccessLevelEnum.Vip2 => 1,
-                Commons.Enums.Account.AccountAccessLevelEnum.Vip3 => 4,
-                Commons.Enums.Account.AccountAccessLevelEnum.Vip4 => 5,
-                Commons.Enums.Account.AccountAccessLevelEnum.Vip5 => 6,
+                Commons.Enums.Account.AccountAccessLevelEnum.Vip3 => 1,
+                Commons.Enums.Account.AccountAccessLevelEnum.Vip4 => 1,
+                Commons.Enums.Account.AccountAccessLevelEnum.Vip5 => 1,
                 _ => 1
             };
 

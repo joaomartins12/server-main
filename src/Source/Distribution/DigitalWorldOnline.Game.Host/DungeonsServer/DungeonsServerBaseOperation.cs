@@ -43,7 +43,7 @@ namespace DigitalWorldOnline.GameHost
             try
             {
                 var mapsToRemove = new List<GameMap>();
-                mapsToRemove.AddRange(Maps.Where(x => x.CloseMap));
+                mapsToRemove.AddRange(Maps.Where(x => x.CloseMap && x.Clients.Count == 0));
 
                 foreach (var map in mapsToRemove)
                 {
@@ -82,6 +82,7 @@ namespace DigitalWorldOnline.GameHost
         /// <summary>
         /// Search for new maps to instance.
         /// </summary>
+        // 2) Pesquisa em background — clona o template e fixa a chave = party.Id
         public async Task SearchNewMaps(CancellationToken cancellationToken)
         {
             try
@@ -92,40 +93,62 @@ namespace DigitalWorldOnline.GameHost
                         _mapper.Map<List<GameMap>>(await _sender.Send(new GameMapsConfigQuery(MapTypeEnum.Dungeon),
                             cancellationToken));
 
-                    var party = _partyManager.Parties;
-                    foreach (var newMap in mapsToLoad)
+                    var parties = _partyManager.Parties;
+
+                    foreach (var party in parties)
                     {
-                        foreach (var partymap in party)
+                        if (party.Members.Count == 0 ||
+                            party.LeaderId < 0 ||
+                            party.LeaderId >= party.Members.Count)
+                            continue;
+
+                        var leaderLoc = party.Members.ElementAt((int)party.LeaderId).Value.Location;
+                        if (leaderLoc == null)
+                            continue;
+
+                        foreach (var template in mapsToLoad)
                         {
-                            // Verifica se o índice LeaderId está dentro do intervalo de Members
-                            if (partymap.Members.Count > 0 &&
-                                partymap.LeaderId >= 0 &&
-                                partymap.LeaderId < partymap.Members.Count &&
-                                Maps.All(x => x.Id == partymap.Id) &&
-                                newMap.MapId == partymap.Members.ElementAt((byte)partymap.LeaderId).Value.Location.MapId)
+                            if (template.MapId != leaderLoc.MapId)
+                                continue;
+
+                            // Se já existir instância da party para este MapId, não cria outra
+                            if (Maps.Any(x => x.DungeonId == party.Id && x.MapId == template.MapId))
+                                continue;
+
+                            _logger.Debug($"Initializing new instance for {template.Type} map {template.Id} - {template.Name}...");
+
+                            // CLONE sempre o template antes de adicionar
+                            var instance = (GameMap)template.Clone();
+
+                            // Royal Base
+                            int[] royalBaseMaps = { 1701, 1702, 1703 };
+                            if (Array.Exists(royalBaseMaps, m => m == instance.MapId))
                             {
-                                _logger.Debug(
-                                    $"Initializing new instance for {newMap.Type} map {newMap.Id} - {newMap.Name}...");
+                                var rb = new RoyalBaseMap((short)instance.MapId, instance.Mobs);
+                                instance.IsRoyalBaseUpdate(true);
+                                instance.setRoyalBaseMap(rb);
+                            }
+                            else
+                            {
+                                instance.IsRoyalBaseUpdate();
+                                instance.setRoyalBaseMap(null);
+                            }
 
-                                int[] RoyalBaseMaps = { 1701, 1702, 1703 };
-                                if (Array.Exists(RoyalBaseMaps, element => element == newMap.MapId))
-                                {
-                                    var royalBaseMap = new RoyalBaseMap((short)newMap.MapId, newMap.Mobs);
-                                    newMap.IsRoyalBaseUpdate(true);
-                                    newMap.setRoyalBaseMap(royalBaseMap);
-                                }
-                                else
-                                {
-                                    newMap.IsRoyalBaseUpdate();
-                                    newMap.setRoyalBaseMap(null);
-                                }
+                            // chave única = PartyId
+                            instance.SetId((int)party.Id);
 
-                                Maps.Add(newMap);
+                            lock (Maps)
+                            {
+                                if (!Maps.Any(x => x.DungeonId == party.Id && x.MapId == instance.MapId))
+                                {
+                                    Maps.Add(instance);
+                                    _logger.Information($"[Dungeon] Instance created (background): PartyId={party.Id}, MapId={instance.MapId}, Name={instance.Name}");
+                                }
                             }
                         }
                     }
 
-                    _lastMapsSearch = DateTime.Now.AddSeconds(5);
+                    _lastMapsSearch = DateTime.Now.AddSeconds(600);
                 }
             }
             catch (Exception ex)
@@ -134,6 +157,7 @@ namespace DigitalWorldOnline.GameHost
             }
         }
 
+        // 3) Pesquisa síncrona por entrada (party/solo) — consistente com a chave
         public async Task SearchNewMaps(bool isParty, GameClient client)
         {
             try
@@ -153,6 +177,8 @@ namespace DigitalWorldOnline.GameHost
                     return;
                 }
 
+                var entranceMapId = client.Tamer.Location.MapId;
+
                 if (isParty)
                 {
                     var party = _partyManager.FindParty(client.TamerId);
@@ -166,26 +192,45 @@ namespace DigitalWorldOnline.GameHost
 
                     _logger.Information("[Dungeon] Party located.");
 
-                    foreach (var newMap in mapsToLoad)
+                    foreach (var template in mapsToLoad)
                     {
-                        if (!Maps.Exists(x => x.DungeonId == party.Id) &&
-                            newMap.MapId == client.Tamer.Location.MapId)
+                        if (template.MapId != entranceMapId)
+                            continue;
+
+                        // se já existe a instância da party, não cria outra
+                        if (Maps.Exists(x => x.DungeonId == party.Id && x.MapId == entranceMapId))
+                            return;
+
+                        lock (Maps)
                         {
-                            AddDungeonInstance(newMap, party.Id, client, isParty);
+                            if (!Maps.Exists(x => x.DungeonId == party.Id))
+                                AddDungeonInstance(template, (int)party.Id, client, isParty);
                         }
+
+                        return;
                     }
                 }
                 else
                 {
                     _logger.Information("[Dungeon] Adding for solo character.");
 
-                    foreach (var newMap in mapsToLoad)
+                    var soloKey = (int)client.TamerId;
+
+                    foreach (var template in mapsToLoad)
                     {
-                        if (!Maps.Exists(x => x.DungeonId == client.TamerId) &&
-                            newMap.MapId == client.Tamer.Location.MapId)
+                        if (template.MapId != entranceMapId)
+                            continue;
+
+                        if (Maps.Exists(x => x.DungeonId == soloKey && x.MapId == entranceMapId))
+                            return;
+
+                        lock (Maps)
                         {
-                            AddDungeonInstance(newMap, (int)client.TamerId, client, isParty);
+                            if (!Maps.Exists(x => x.DungeonId == soloKey))
+                                AddDungeonInstance(template, soloKey, client, isParty);
                         }
+
+                        return;
                     }
                 }
             }
@@ -199,6 +244,16 @@ namespace DigitalWorldOnline.GameHost
         {
             try
             {
+                // evita duplicações por corrida
+                lock (Maps)
+                {
+                    if (Maps.Any(x => x.DungeonId == dungeonId || x.Id == dungeonId))
+                    {
+                        _logger.Information($"[Dungeon] Já existe instância com dungeonId={dungeonId}. Ignorando criação.");
+                        return;
+                    }
+                }
+
                 var newDungeon = (GameMap)newMap.Clone();
 
                 // Remover mobs do Coliseu
@@ -228,15 +283,25 @@ namespace DigitalWorldOnline.GameHost
 
                 string type = isParty ? "Party" : "Tamer";
                 _logger.Warning($"[Dungeon] Adding {newMap.Name} for {type} of {client.Tamer.Name}...");
-                Maps.Add(newDungeon);
-                _logger.Warning($"[Dungeon] Added {newMap.Name} for {type} of {client.Tamer.Name}...");
+
+                lock (Maps)
+                {
+                    if (!Maps.Any(x => x.DungeonId == dungeonId || x.Id == dungeonId))
+                    {
+                        Maps.Add(newDungeon);
+                        _logger.Warning($"[Dungeon] Added {newMap.Name} for {type} of {client.Tamer.Name}...");
+                    }
+                    else
+                    {
+                        _logger.Information($"[Dungeon] Instância já existe (race) para dungeonId={dungeonId}. Não adicionada.");
+                    }
+                }
             }
             catch (Exception ex)
             {
                 _logger.Error($"Error adding dungeon instance: {ex.Message} {ex.StackTrace}");
             }
         }
-
 
         /// <summary>
         /// Gets the maps objects.
@@ -389,9 +454,17 @@ namespace DigitalWorldOnline.GameHost
                 // Unify operations into a single task to ensure synchronization and exception handling
                 await Task.Run(() =>
                 {
-                    TamerOperation(map);
-                    MonsterOperation(map);
-                    DropsOperation(map);
+                    try
+                    {
+                        TamerOperation(map);
+                        MonsterOperation(map);
+                        DropsOperation(map);
+                    }
+                    catch (Exception innerEx)
+                    {
+                        _logger.Warning($"[Dungeon] Non-critical map loop error in MapId={map.MapId}: {innerEx.Message}");
+                        // Não fecha o mapa — apenas loga
+                    }
                 });
 
                 stopwatch.Stop();
@@ -413,22 +486,22 @@ namespace DigitalWorldOnline.GameHost
         /// Adds a new gameclient to the target map.
         /// </summary>
         /// <param name="client">The game client to be added.</param>
+        // 1) Usa apenas party.Id como chave de instância (nunca LeaderId)
         private GameMap FindExistingDungeonMap(GameClient client, GameParty party)
         {
             try
             {
-                // Use a single LINQ query to simplify and optimize the search logic
                 return Maps.FirstOrDefault(x =>
                     x.Initialized &&
                     x.MapId == client.Tamer.Location.MapId &&
                     (party != null
-                        ? (x.DungeonId == party.LeaderId || x.DungeonId == party.Id)
+                        ? (x.DungeonId == party.Id)
                         : x.DungeonId == client.Tamer.Id));
             }
             catch (Exception ex)
             {
                 _logger.Error($"Error in FindExistingDungeonMap: {ex.Message} {ex.StackTrace}");
-                throw; // Re-throw the exception to ensure it propagates if necessary
+                throw;
             }
         }
 
@@ -444,25 +517,38 @@ namespace DigitalWorldOnline.GameHost
                 client.Tamer.MobsInView.Clear();
                 _logger.Debug($"[JoinMap] Cleared MobsInView for client TamerId: {client.TamerId}");
 
+                // ✅ NOVO (mínimo): garante que o cliente não está listado em outra instância
+                foreach (var m in Maps.ToList())
+                {
+                    if (m == null || m == map) continue;
+
+                    if (m.Clients.RemoveAll(c => c != null && c.TamerId == client.TamerId) > 0)
+                        _logger.Information($"[JoinMap] Detach {client.TamerId} de Inst={m.Id} (MapId={m.MapId})");
+
+                    m.TamersView?.Remove(client.TamerId);
+                    if (m.TamersView != null)
+                    {
+                        foreach (var kv in m.TamersView)
+                            kv.Value?.Remove(client.TamerId);
+                    }
+                }
+
                 await map.AddClientDG(client);
                 _logger.Debug($"[JoinMap] AddClientDG called for client TamerId: {client.TamerId}, MapId: {map.MapId}");
-
+                _lastClientJoin[client.TamerId] = DateTime.Now;
                 client.Tamer.Revive();
                 _logger.Debug($"[JoinMap] Revive called for client TamerId: {client.TamerId}");
 
                 _logger.Information($"[JoinMap] Successfully joined client TamerId: {client.TamerId} to MapId: {map.MapId}");
             }
-
             catch (Exception ex)
             {
                 _logger.Error($"[JoinMap] Error while joining client TamerId: {client.TamerId} to MapId: {map.MapId}: {ex.Message} {ex.StackTrace}");
                 if (client.Tamer.Guild != null)
                 {
-                    // Existing code
                     await _sender.Send(new UpdateGuildMemberCommand(client.Tamer.Guild.Id, client.TamerId));
                 }
 
-                // Handle the error gracefully to avoid affecting the entire system
                 try
                 {
                     client.Disconnect();
@@ -477,6 +563,8 @@ namespace DigitalWorldOnline.GameHost
             {
                 _logger.Debug($"[JoinMap] Finished execution for client TamerId: {client.TamerId}, MapId: {map.MapId}");
             }
+            _logger.Information($"[JoinMap] MapId={map.MapId} | ClientsActive={map.Clients.Count} | Tamers: {string.Join(", ", map.Clients.Select(c => c.Tamer.Name))}");
+
         }
 
         private async Task<GameMap> WaitForMapInitialization(GameClient client, GameParty party, MapConfigDTO mapConfig)
@@ -516,6 +604,7 @@ namespace DigitalWorldOnline.GameHost
             return null;
         }
 
+        // 4) AddClient — remove “órfãos” só por PartyId (nada de LeaderId)
         public async Task AddClient(GameClient client)
         {
             try
@@ -554,11 +643,11 @@ namespace DigitalWorldOnline.GameHost
                     return;
                 }
 
-                // Remove mapas órfãos  
+                // Remove mapas órfãos APENAS com a chave certa (PartyId)
                 if (isInParty)
-                    Maps.RemoveAll(x => x.DungeonId == party!.LeaderId || x.DungeonId == party.Id);
+                    Maps.RemoveAll(x => x.DungeonId == party!.Id);
 
-                // Tenta criar um novo mapa  
+                // Tenta criar um novo mapa
                 await SearchNewMaps(isInParty, client);
 
                 selectedMap = await WaitForMapInitialization(client, party, mapConfig);
@@ -582,51 +671,52 @@ namespace DigitalWorldOnline.GameHost
             }
         }
 
-
         /// <summary>
         /// Removes the gameclient from the target map.
         /// </summary>
         /// <param name="client">The gameclient to be removed.</param>
+        // 5) RemoveClient — limpa só a instância com a chave real (PartyId)
+        private readonly Dictionary<long, DateTime> _lastClientJoin = new();
+
         public void RemoveClient(GameClient client)
         {
             try
             {
-                var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == client.TamerId));
+                // Ignora se o jogador acabou de entrar há menos de 5 segundos
+                if (_lastClientJoin.TryGetValue(client.TamerId, out var lastJoin) &&
+                    (DateTime.Now - lastJoin).TotalSeconds < 5)
+                {
+                    _logger.Warning($"[Dungeon] Ignorando RemoveClient para {client.Tamer.Name} — acabou de entrar na dungeon ({(DateTime.Now - lastJoin).TotalMilliseconds}ms atrás).");
+                    return;
+                }
 
-                map?.BroadcastForTargetTamers(client.TamerId,
-                    new LocalMapSwapPacket(
-                        client.Tamer.GeneralHandler,
-                        client.Tamer.Partner.GeneralHandler,
-                        client.Tamer.Location.X,
-                        client.Tamer.Location.Y,
-                        client.Tamer.Partner.Location.X,
-                        client.Tamer.Partner.Location.Y
-                    ).Serialize()
-                );
+                var map = Maps.FirstOrDefault(x => x.Clients.Exists(gc => gc.TamerId == client.TamerId));
+                if (map == null)
+                {
+                    _logger.Warning($"[Dungeon] RemoveClient chamado mas o mapa não foi encontrado para TamerId={client.TamerId}");
+                    return;
+                }
 
-                map?.RemoveClient(client);
+                map.RemoveClient(client);
 
                 var party = _partyManager.FindParty(client.TamerId);
-
-                if (party != null)
+                Task.Run(async () =>
                 {
-                    if (map?.Clients.Count == 0)
+                    await Task.Delay(5000);
+                    lock (Maps)
                     {
-                        _logger.Warning($"[Dungeon] Party dungeon {map.Name} fechada (party {party.Id}) — nenhum jogador ativo.");
-                        map.MarkForClose();
-                        CleanMap(party.Id);
-                        CleanMap((int)party.LeaderId);
+                        if (map.Clients.Count == 0)
+                        {
+                            _logger.Warning($"[Dungeon] Nenhum jogador ativo após 5s em {map.Name}. Fechando instância.");
+                            map.MarkForClose();
+                            CleanMap(party != null ? (int)party.Id : (int)client.TamerId);
+                        }
+                        else
+                        {
+                            _logger.Information($"[Dungeon] Ainda existem jogadores na instância {map.Name}, mantendo aberta.");
+                        }
                     }
-                }
-                else
-                {
-                    if (map?.Clients.Count == 0)
-                    {
-                        _logger.Warning($"[Dungeon] Solo dungeon {map?.Name} fechada (tamer {client.TamerId}).");
-                        map?.MarkForClose();
-                        CleanMap((int)client.TamerId);
-                    }
-                }
+                });
             }
             catch (Exception ex)
             {
@@ -799,7 +889,30 @@ namespace DigitalWorldOnline.GameHost
             try
             {
                 var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == sourceId));
-                map?.BroadcastForTargetTamers(map.TamersView[sourceId], packet);
+                if (map == null)
+                    return;
+
+                if (map.TamersView != null &&
+                    map.TamersView.TryGetValue(sourceId, out var viewers) &&
+                    viewers != null &&
+                    viewers.Count > 0)
+                {
+                    // 🔹 Broadcast normal (viewers válidos)
+                    map.BroadcastForTargetTamers(viewers, packet);
+                }
+                else
+                {
+                    // 🔹 Envia o packet para todos os jogadores do mesmo mapa, exceto o próprio
+                    var allTamers = map.Clients
+                        .Where(c => c.TamerId != sourceId)
+                        .Select(c => c.TamerId)
+                        .ToList();
+
+                    if (allTamers.Count > 0)
+                    {
+                        map.BroadcastForTargetTamers(allTamers, packet);
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -824,8 +937,7 @@ namespace DigitalWorldOnline.GameHost
         {
             try
             {
-                var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient =>
-                    gameClient.TamerId == client.TamerId && gameClient.Tamer.Channel == client.Tamer.Channel));
+                var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == client.TamerId));
                 map?.BroadcastForTamerViewsAndSelf(client.TamerId, packet);
             }
             catch (Exception ex)

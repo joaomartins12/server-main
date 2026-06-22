@@ -78,31 +78,21 @@ namespace DigitalWorldOnline.Commons.Models.Base
         /// Increase the current inventory size/slots.
         /// </summary>
         /// <param name="amount">Slots to add.</param>
-        public short AddSlots(byte amount = 1)
+        public byte AddSlots(byte amount = 1)
         {
-            // define o slot base conforme o tipo da lista
-            int baseSlot = Type switch
+            for (byte i = 0; i < amount; i++)
             {
-                ItemListEnum.Warehouse => (int)GeneralSizeEnum.WarehouseMinSlot, // 2000
-                ItemListEnum.Inventory => (int)GeneralSizeEnum.InventoryMinSlot, // 0
-                _ => Items.Any() ? Items.Min(x => x.Slot) : 0
-            };
-
-            // próximo slot disponível (evita duplicados)
-            int nextSlot = Items.Any() ? Items.Max(x => x.Slot) + 1 : baseSlot;
-
-            for (int i = 0; i < amount; i++)
-            {
-                var newItemSlot = new ItemModel(nextSlot++)
+                var newItemSlot = new ItemModel(Items.Max(x => x.Slot))
                 {
                     ItemListId = Id
                 };
 
                 Items.Add(newItemSlot);
-                Size++; // Size agora é short
+
+                Size++;
             }
 
-            return Size; // retorna short, sem truncar
+            return Size;
         }
 
         /// <summary>

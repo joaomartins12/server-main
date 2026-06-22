@@ -171,7 +171,5 @@ namespace DigitalWorldOnline.Commons.Models.Digimon
             DebuffList = new DigimonDebuffListModel();
             CurrentCondition = ConditionEnum.Default;
         }
-        public bool PendingStop { get; set; } = false;
-
     }
 }

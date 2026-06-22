@@ -22,11 +22,11 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             _logger = logger;
         }
 
-        public async Task Process(GameClient client, byte[] packetData)
+        public Task Process(GameClient client, byte[] packetData)
         {
-
-            var packet = new GamePacketReader(packetData);
+            // No need to instantiate GamePacketReader since we don't read any data
             client.Send(new CashShopIniciarPacket());
+            return Task.CompletedTask;
         }
     }
 }

@@ -24,7 +24,7 @@ namespace DigitalWorldOnline.Infrastructure.ContextConfiguration.Shared
 
             builder
                 .Property(x => x.Size)
-                .HasColumnType("smallint") // <- era tinyint
+                .HasColumnType("tinyint")
                 .IsRequired();
 
             builder

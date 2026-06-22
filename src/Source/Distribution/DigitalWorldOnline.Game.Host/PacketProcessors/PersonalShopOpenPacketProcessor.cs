@@ -4,6 +4,7 @@ using DigitalWorldOnline.Application.Separar.Commands.Create;
 using DigitalWorldOnline.Application.Separar.Commands.Update;
 using DigitalWorldOnline.Application.Separar.Queries;
 using DigitalWorldOnline.Commons.Entities;
+using DigitalWorldOnline.Commons.Enums;
 using DigitalWorldOnline.Commons.Enums.ClientEnums;
 using DigitalWorldOnline.Commons.Enums.PacketProcessor;
 using DigitalWorldOnline.Commons.Extensions;
@@ -44,86 +45,132 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         }
         public async Task Process(GameClient client,byte[] packetData)
         {
-            var packet = new GamePacketReader(packetData);
-
-            packet.Skip(4);
-            var handler = packet.ReadInt();
-            var personalShop = _mapServer.FindClientByTamerHandle(handler);
-
-            _logger.Debug($"Searching personal shop with handler {handler}...");
-
-            var consignedShopData = await _sender.Send(new ConsignedShopByHandlerQuery(handler));
-            if (consignedShopData == null)
+            try
             {
-                _logger.Error($"Consigned shop not found for handler {handler}.");
-                return;
-            }
+                var packet = new GamePacketReader(packetData);
 
-            var sellerData = await _sender.Send(new CharacterAndItemsByIdQuery(consignedShopData.CharacterId));
-            if (sellerData == null)
-            {
-                _logger.Error($"Seller not found for shop {consignedShopData.CharacterId}.");
-                return;
-            }
+                packet.Skip(4);
+                var handler = packet.ReadInt();
 
-            var consignedShop = _mapper.Map<ConsignedShop>(consignedShopData);
-            var seller = _mapper.Map<CharacterModel>(sellerData);
+                _logger.Debug($"Searching personal shop with handler {handler}...");
 
-            var itemInfoLookup = _assets.ItemInfo.ToDictionary(x => x.ItemId,x => x);
-
-            if (personalShop != null)
-            {
-                _logger.Debug($"Found Tamer {personalShop.Tamer.Name} with shop {personalShop.Tamer.ShopName} - {handler}.");
-
-                foreach (var item in personalShop.Tamer.TamerShop.Items)
+                //1) If the target tamer is online and has a personal shop, use its in-memory data directly (fast path)
+                var personalShop = _mapServer.FindClientByTamerHandle(handler);
+                if (personalShop != null)
                 {
-                    if (itemInfoLookup.TryGetValue(item.ItemId,out var itemInfo))
+                    _logger.Debug($"Fast-path: Found online personal shop owner {personalShop.Tamer.Name} - sending their shop items.");
+
+                    var tShop = personalShop.Tamer.TamerShop;
+
+                    // Populate item infos quickly from assets lookup
+                    var itemInfoLookup = _assets.ItemInfo.ToDictionary(x => x.ItemId, x => x);
+                    if (tShop != null)
                     {
-                        item.SetItemInfo(itemInfo);
+                        foreach (var item in tShop.Items)
+                        {
+                            if (itemInfoLookup.TryGetValue(item.ItemId, out var itemInfo))
+                                item.SetItemInfo(itemInfo);
+                        }
+
+                        // Ensure empties are fixed and persist asynchronously without blocking response
+                        tShop.CheckEmptyItems();
+                        _ = _sender.Send(new UpdateItemsCommand(tShop));
                     }
 
-                    if (item.ItemId > 0 && item.ItemInfo == null)
-                    {
-                        item.SetItemId();
-                        personalShop.Tamer.TamerShop.CheckEmptyItems();
+                    client.Send(new PersonalShopItemsViewPacket(personalShop.Tamer.TamerShop, personalShop.Tamer.ShopName));
+                    return;
+                }
 
-                        _logger.Debug($"Updating consigned shop item list...");
-                        await _sender.Send(new UpdateItemsCommand(personalShop.Tamer.TamerShop));
+                //2) Try to find consigned shop in map cache (cheaper than DB)
+                var mapContaining = _mapServer.Maps.FirstOrDefault(m => m.Clients.Exists(c => c.TamerId == client.TamerId));
+                ConsignedShop? cachedShop = null;
+                if (mapContaining != null)
+                {
+                    // map may have ConsignedShops list updated by ConsignedShopManager
+                    cachedShop = mapContaining.ConsignedShops.FirstOrDefault(s => s.GeneralHandler == (uint)handler || s.GeneralHandler == (uint)handler);
+                    if (cachedShop != null)
+                    {
+                        _logger.Debug($"Cache-path: Found consigned shop in map cache for handler {handler}.");
                     }
                 }
 
-                _logger.Debug($"Sending consigned shop item list view packet...");
-                client.Send(new PersonalShopItemsViewPacket(personalShop.Tamer.TamerShop,personalShop.Tamer.ShopName));
-                return;
-            }
-
-            _logger.Debug($"Sending consigned shop items for {seller.Name}...");
-
-            foreach (var item in seller.ConsignedShopItems.EquippedItems)
-            {
-                if (itemInfoLookup.TryGetValue(item.ItemId,out var itemInfo))
+                //3) If cached shop found, try to find seller client in maps (online) to use in-memory items
+                if (cachedShop != null)
                 {
-                    item.SetItemInfo(itemInfo);
+                    var sellerClient = _mapServer.FindClientByTamerId(cachedShop.CharacterId);
+                    ItemListModel consignedItems = new ItemListModel(ItemListEnum.ConsignedShop);
+                    string ownerName = string.Empty;
+
+                    if (sellerClient != null && sellerClient.IsConnected)
+                    {
+                        ownerName = sellerClient.Tamer.Name;
+                        consignedItems = sellerClient.Tamer.ConsignedShopItems ?? new ItemListModel(ItemListEnum.ConsignedShop);
+                    }
+                    else
+                    {
+                        // seller offline: fall back to DB to fetch seller items and info
+                        var sellerDto = await _sender.Send(new CharacterAndItemsByIdQuery(cachedShop.CharacterId));
+                        if (sellerDto != null)
+                        {
+                            var seller = _mapper.Map<CharacterModel>(sellerDto);
+                            ownerName = seller.Name;
+                            consignedItems = seller.ConsignedShopItems ?? new ItemListModel(ItemListEnum.ConsignedShop);
+                        }
+                    }
+
+                    // Populate item info and persist empty-check asynchronously
+                    var itemInfoLookup = _assets.ItemInfo.ToDictionary(x => x.ItemId, x => x);
+                    foreach (var item in consignedItems.Items)
+                    {
+                        if (itemInfoLookup.TryGetValue(item.ItemId, out var info))
+                            item.SetItemInfo(info);
+                    }
+
+                    consignedItems.CheckEmptyItems();
+                    _ = _sender.Send(new UpdateItemsCommand(consignedItems));
+
+                    client.Send(new ConsignedShopItemsViewPacket(cachedShop, consignedItems, ownerName, false));
+                    return;
                 }
 
-                if (item.ItemId > 0 && item.ItemInfo == null)
+                //4) Fallback: fetch consigned shop DTO from DB via sender (slower path)
+                var consignedShopData = await _sender.Send(new ConsignedShopByHandlerQuery(handler));
+                if (consignedShopData == null)
                 {
-
-                    item.SetItemId();
-                    personalShop.Tamer.TamerShop.CheckEmptyItems();
-
-                    _logger.Debug($"Updating equipped consigned shop items...");
-                    await _sender.Send(new UpdateItemsCommand(seller.ConsignedShopItems));
+                    _logger.Warning($"Consigned shop not found for handler {handler}. Sending empty view.");
+                    client.Send(new ConsignedShopItemsViewPacket());
+                    return;
                 }
-            }
 
-            if (seller.Name == client.Tamer.Name)
-            {
-                client.Send(new ConsignedShopItemsViewPacket(consignedShop,seller.ConsignedShopItems,seller.Name,true));
+                var sellerData = await _sender.Send(new CharacterAndItemsByIdQuery(consignedShopData.CharacterId));
+                if (sellerData == null)
+                {
+                    _logger.Warning($"Seller not found for shop {consignedShopData.CharacterId}. Sending empty view.");
+                    client.Send(new ConsignedShopItemsViewPacket());
+                    return;
+                }
+
+                var consignedShop = _mapper.Map<ConsignedShop>(consignedShopData);
+                var sellerModel = _mapper.Map<CharacterModel>(sellerData);
+
+                var itemLookup = _assets.ItemInfo.ToDictionary(x => x.ItemId, x => x);
+                var consignedItemsFromDb = sellerModel.ConsignedShopItems ?? new ItemListModel(ItemListEnum.ConsignedShop);
+
+                foreach (var item in consignedItemsFromDb.Items)
+                {
+                    if (itemLookup.TryGetValue(item.ItemId, out var itinfo))
+                        item.SetItemInfo(itinfo);
+                }
+
+                consignedItemsFromDb.CheckEmptyItems();
+                await _sender.Send(new UpdateItemsCommand(consignedItemsFromDb));
+
+                client.Send(new ConsignedShopItemsViewPacket(consignedShop, consignedItemsFromDb, sellerModel.Name, sellerModel.Name == client.Tamer.Name));
             }
-            else
+            catch (Exception ex)
             {
-                client.Send(new ConsignedShopItemsViewPacket(consignedShop,seller.ConsignedShopItems,seller.Name));
+                _logger.Error(ex, "Error processing PersonalShopOpen packet. Sending empty response to avoid client freeze.");
+                client.Send(new ConsignedShopItemsViewPacket());
             }
         }
 

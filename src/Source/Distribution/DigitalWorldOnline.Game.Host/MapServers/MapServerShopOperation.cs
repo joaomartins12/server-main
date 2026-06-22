@@ -135,7 +135,6 @@ namespace DigitalWorldOnline.GameHost
                     _logger.Error($"[ConsignedShop] Falha ao fazer resync atrasado para {tamer.Id}:{tamer.Name}: {ex.Message}");
                 }
             });
-            _logger.Information($"[SHOP DEBUG] A enviar {map.ConsignedShops.Count} shops para {tamer.Name}");
         }
 
         // 🚪 Chamado quando o player entra no mapa
@@ -148,8 +147,6 @@ namespace DigitalWorldOnline.GameHost
             {
                 ShowConsignedShop(map, shop, tamer.Id);
             }
-
-            _logger.Information($"[SHOP DEBUG] {map.ConsignedShops.Count} shops enviadas imediatamente para {tamer.Name} ao entrar no mapa {map.Id}.");
         }
 
         // 🔄 Chamado quando o player dá reload no mesmo mapa
@@ -162,8 +159,6 @@ namespace DigitalWorldOnline.GameHost
             {
                 ShowConsignedShop(map, shop, tamer.Id);
             }
-
-            _logger.Information($"[SHOP DEBUG] {map.ConsignedShops.Count} shops enviadas imediatamente para {tamer.Name} ao entrar no mapa {map.Id}.");
         }
 
         // 🌍 Atualiza periodicamente todas as shops visíveis no mapa

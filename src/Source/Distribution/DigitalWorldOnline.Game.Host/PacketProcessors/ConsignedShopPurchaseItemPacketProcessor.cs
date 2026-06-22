@@ -145,7 +145,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             newItem.SetItemInfo(itemInfo);
 
             client.Tamer.Inventory.AddItems(((ItemModel)newItem.Clone()).GetList());
-            await _sender.Send(new UpdateItemsCommand(client.Tamer.Inventory));
+            // Force synchronous flush for buyer inventory (critical)
+            await _sender.Send(new UpdateItemsCommand(client.Tamer.Inventory, true));
 
             var sellerClient = client.Server.FindByTamerId(shop.CharacterId);
 
@@ -158,7 +159,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 await _sender.Send(new UpdateItemListBitsCommand(sellerClient.Tamer.ConsignedWarehouse));
 
                 refreshedSeller.ConsignedShopItems.RemoveOrReduceItems(((ItemModel)newItem.Clone()).GetList(), true);
-                await _sender.Send(new UpdateItemsCommand(refreshedSeller.ConsignedShopItems));
+                // Force synchronous flush for seller consigned shop items (critical)
+                await _sender.Send(new UpdateItemsCommand(refreshedSeller.ConsignedShopItems, true));
             }
             else
             {
@@ -166,13 +168,14 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 refreshedSeller.ConsignedShopItems.RemoveOrReduceItems(((ItemModel)newItem.Clone()).GetList(), true);
 
                 await _sender.Send(new UpdateItemListBitsCommand(refreshedSeller.ConsignedWarehouse));
-                await _sender.Send(new UpdateItemsCommand(refreshedSeller.ConsignedShopItems));
+                // Force synchronous flush for seller consigned shop items (critical)
+                await _sender.Send(new UpdateItemsCommand(refreshedSeller.ConsignedShopItems, true));
             }
 
             if (refreshedSeller.ConsignedShopItems.Count == 0)
             {
                 await _sender.Send(new DeleteConsignedShopCommand(shopHandler));
-                await _sender.Send(new UpdateItemsCommand(refreshedSeller.ConsignedShopItems));
+                await _sender.Send(new UpdateItemsCommand(refreshedSeller.ConsignedShopItems, true));
 
                 _mapServer.BroadcastForTamerViewsAndSelf(client.Tamer.Id, new UnloadConsignedShopPacket(shopHandler).Serialize());
                 _mapServer.BroadcastForTamerViewsAndSelf(client.Tamer.Id, new ConsignedShopClosePacket().Serialize());

@@ -1,50 +1,25 @@
 ﻿@inherits LayoutComponentBase
-@using MudBlazor
 
-<MudThemeProvider Theme="_theme" IsDarkMode="true" />
+<MudThemeProvider Theme="_currentTheme"></MudThemeProvider>
 <MudSnackbarProvider />
 
-<MudLayout Class="app-bg">
+<MudLayout>
     <MudMainContent>
-        <MudContainer MaxWidth="MaxWidth.False" Class="content-container">
+        <MudContainer MaxWidth="MaxWidth.False" Style="margin-top:40px;">
             @Body
         </MudContainer>
     </MudMainContent>
 </MudLayout>
 
-<style>
-    /* garante fundo escuro e altura total */
-    .app-bg {
-        min-height: 100vh;
-        background-color: #121212;
-    }
-
-    .content-container {
-        margin-top: 40px;
-    }
-</style>
-
 @code {
-    private readonly MudTheme _theme = new()
-    {
-        // paleta usada quando IsDarkMode = true
-        PaletteDark = new PaletteDark
+
+    private MudTheme _currentTheme = new MudTheme()
         {
-            Background = "#121212",
-            Surface = "#1E1E1E",
-
-            AppbarBackground = "#0F172A",
-
-            Primary = "#90CAF9",
-            Secondary = "#F48FB1",
-
-            TextPrimary = "#E5E7EB",
-            TextSecondary = "#94A3B8",
-
-            Success = "#34D399",
-            Warning = "#FBBF24",
-            Error = "#F87171",
-            Info = "#60A5FA"
-        }
-    };
+            Palette = new Palette()
+            {
+                AppbarBackground = "#fbc802",
+                Primary = "#155883",
+                DrawerIcon = "#134d74"
+            }
+        };
 }

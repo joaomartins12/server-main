@@ -76,70 +76,57 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Account
         public async Task CreateOrUpdateSecondaryPasswordByIdAsync(long accountId, string secondaryPassword)
         {
             var dto = await _context.Account
-                .AsNoTracking()
-                .SingleOrDefaultAsync(x => x.Id == accountId);
+                .SingleOrDefaultAsync(x => x.Id == accountId); // ❌ removido AsNoTracking()
 
             if (dto != null)
             {
                 dto.SecondaryPassword = secondaryPassword;
-
-                _context.Update(dto);
-                _context.SaveChanges();
+                await _context.SaveChangesAsync(); // ✅ não precisa de _context.Update()
             }
         }
 
         public async Task UpdateLastPlayedServerByIdAsync(long accountId, long serverId)
         {
             var dto = await _context.Account
-                .AsNoTracking()
-                .SingleOrDefaultAsync(x => x.Id == accountId);
+                .SingleOrDefaultAsync(x => x.Id == accountId); // ❌ removido AsNoTracking()
 
             if (dto != null)
             {
                 dto.LastPlayedServer = serverId;
                 dto.LastConnection = DateTime.Now;
-
-                _context.Update(dto);
-                _context.SaveChanges();
+                await _context.SaveChangesAsync(); // ✅ não precisa de _context.Update()
             }
         }
 
         public async Task UpdateLastPlayedCharacterByIdAsync(long accountId, long characterId)
         {
             var dto = await _context.Account
-                .AsNoTracking()
-                .SingleOrDefaultAsync(x => x.Id == accountId);
+                .SingleOrDefaultAsync(x => x.Id == accountId); // ❌ removido AsNoTracking()
 
             if (dto != null)
             {
                 dto.LastPlayedCharacter = characterId;
-
-                _context.Update(dto);
-                _context.SaveChanges();
+                await _context.SaveChangesAsync(); // ✅ EF já rastreia dto
             }
         }
 
         public async Task UpdatePremiumAndSilkByIdAsync(long accountId, int premium, int silk)
         {
             var dto = await _context.Account
-                .AsNoTracking()
-                .SingleOrDefaultAsync(x => x.Id == accountId);
+                .SingleOrDefaultAsync(x => x.Id == accountId); // ❌ removido AsNoTracking()
 
             if (dto != null)
             {
                 dto.Premium = premium;
                 dto.Silk = silk;
-
-                _context.Update(dto);
-                _context.SaveChanges();
+                await _context.SaveChangesAsync(); // ✅ EF detecta mudanças automaticamente
             }
         }
 
         public async Task UpdateAccountAsync(AccountModel account)
         {
             var dto = await _context.Account
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.Id == account.Id);
+                .FirstOrDefaultAsync(x => x.Id == account.Id); // ❌ removido AsNoTracking()
 
             if (dto != null)
             {
@@ -150,23 +137,19 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Account
                 dto.Premium = account.Premium;
                 dto.Silk = account.Silk;
 
-                _context.Update(dto);
-                _context.SaveChanges();
+                await _context.SaveChangesAsync(); // ✅ não precisa de _context.Update(dto)
             }
         }
-        
+
         public async Task UpdateAccountMembershipAsync(long accountId, DateTime? expirationDate)
         {
             var dto = await _context.Account
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.Id == accountId);
+                .FirstOrDefaultAsync(x => x.Id == accountId); // ❌ removido AsNoTracking()
 
             if (dto != null)
             {
                 dto.MembershipExpirationDate = expirationDate;
-
-                _context.Update(dto);
-                _context.SaveChanges();
+                await _context.SaveChangesAsync(); // ✅ EF detecta a mudança automaticamente
             }
         }
 
@@ -182,7 +165,7 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Account
             if (dto != null)
             {
                 _context.Remove(dto);
-                _context.SaveChanges();
+                await _context.SaveChangesAsync();
             }
         }
 
@@ -196,7 +179,7 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Account
 
                 _context.Update(dto);
 
-                _context.SaveChanges();
+                await _context.SaveChangesAsync();
             }
         }
 
@@ -208,7 +191,7 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Account
             if(dto != null)
             {
                 _context.Remove(dto);
-                _context.SaveChanges();
+                await _context.SaveChangesAsync();
             }
         }
       

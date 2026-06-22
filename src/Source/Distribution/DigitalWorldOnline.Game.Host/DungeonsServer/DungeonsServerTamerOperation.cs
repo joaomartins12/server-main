@@ -41,13 +41,15 @@ namespace DigitalWorldOnline.GameHost
 
             var sw = Stopwatch.StartNew();
 
+            // ✅ Chamar portas UMA vez por tick (evita flood/oscilações)
+            DungeonDoors(map);
+
             foreach (var tamer in map.ConnectedTamers)
             {
-                var client = map.Clients
-                                .FirstOrDefault(x => x.TamerId == tamer.Id);
+                var client = map.Clients.FirstOrDefault(x => x.TamerId == tamer.Id);
                 if (client?.IsConnected != true || client.Partner == null)
                     continue;
-                DungeonDoors(map);
+
                 ProcessDebuffs(client);
                 ProcessVisibility(map, tamer, client);
                 ProcessAttacks(tamer, client);
@@ -341,7 +343,7 @@ namespace DigitalWorldOnline.GameHost
             // Atualiza o timer interno
             tamer.UpdateSyncResourcesTime();
 
-            // Novo estado consolidado
+            // Estado consolidado
             var state = new SyncResourceState(
                 Hp: (short)tamer.CurrentHp,
                 Ds: (short)tamer.CurrentDs,
@@ -351,16 +353,13 @@ namespace DigitalWorldOnline.GameHost
                 XCrystals: (short)tamer.XCrystals
             );
 
-            // Se é igual ao último, pula o envio
-            // Se é igual ao último, pula o envio (exceto Xai)
+            // Se é igual ao último, evita spam — mas garante Xai/DS
             if (state == tamer.LastSyncState)
             {
-                // Sempre envia o Xai para garantir atualização visual
+                // X-AI sempre visível
                 client.Send(new TamerXaiResourcesPacket(state.XGauge, state.XCrystals));
-
-                // Atualiza o DS do tamer durante a evolução
+                // Atualiza DS/HP do tamer durante evolução
                 client.Send(new UpdateCurrentResourcesPacket(tamer.GeneralHandler, (short)tamer.CurrentHp, (short)tamer.CurrentDs, 0));
-
                 return;
             }
 
@@ -374,61 +373,34 @@ namespace DigitalWorldOnline.GameHost
             // 2) Broadcast de HP rate e condição para quem estiver vendo
             map.BroadcastForTargetTamers(
                 tamer.Id,
-                new UpdateCurrentHPRatePacket(
-                    tamer.GeneralHandler, tamer.HpRate
-                ).Serialize()
+                new UpdateCurrentHPRatePacket(tamer.GeneralHandler, tamer.HpRate).Serialize()
             );
             map.BroadcastForTargetTamers(
                 tamer.Id,
-                new UpdateCurrentHPRatePacket(
-                    tamer.Partner.GeneralHandler, tamer.Partner.HpRate
-                ).Serialize()
+                new UpdateCurrentHPRatePacket(tamer.Partner.GeneralHandler, tamer.Partner.HpRate).Serialize()
             );
             map.BroadcastForTamerViewsAndSelf(
                 tamer.Id,
-                new SyncConditionPacket(
-                    tamer.GeneralHandler,
-                    tamer.CurrentCondition,
-                    tamer.ShopName
-                ).Serialize()
+                new SyncConditionPacket(tamer.GeneralHandler, tamer.CurrentCondition, tamer.ShopName).Serialize()
             );
 
-            // 3) Atualiza party de forma concisa
+            // 3) Atualiza party se existir — sem dissolver automaticamente
             var party = _partyManager.FindParty(tamer.Id);
             if (party != null)
             {
-                if (party.Members.Count == 1)
-                {
-                    // kick slots 0–3
-                    for (int slot = 0; slot < 4; slot++)
-                        BroadcastForTargetTamers(
-                            tamer.Id,
-                            new PartyMemberKickPacket((byte)slot).Serialize()
-                        );
-                    _partyManager.RemoveParty(party.Id);
-                }
-                else
-                {
-                    party.UpdateMember(party[tamer.Id], tamer);
-                    map.BroadcastForTargetTamers(
-                        party.GetMembersIdList(),
-                        new PartyMemberInfoPacket(party[tamer.Id]).Serialize()
-                    );
+                // Atualiza o membro no snapshot da party e sincroniza UI
+                party.UpdateMember(party[tamer.Id], tamer);
 
-                    var leaderEntry = party.GetMemberById(party.LeaderId);
-                    if (leaderEntry != null)
-                    {
-                        party.LeaderSlot = leaderEntry.Value.Key;
-                        BroadcastForTargetTamers(
-                            party.GetMembersIdList(),
-                            new PartyLeaderChangedPacket(
-                                (int)leaderEntry.Value.Key
-                            ).Serialize()
-                        );
-                    }
+                map.BroadcastForTargetTamers(
+                    party.GetMembersIdList(),
+                    new PartyMemberInfoPacket(party[tamer.Id]).Serialize()
+                );
 
-                    client.Send(new PartyMemberListPacket(party, tamer.Id));
-                }
+                // ❌ NÃO alterar/deduzir liderança aqui com base em LeaderId ambíguo
+                // ❌ NÃO dissolver party quando Members.Count == 1 (isso quebra a chave da instância)
+
+                // Opcional: reenviar lista para o próprio (mantém compatibilidade com o teu client)
+                client.Send(new PartyMemberListPacket(party, tamer.Id));
             }
         }
 

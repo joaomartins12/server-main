@@ -31,53 +31,44 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         public async Task Process(GameClient client, byte[] packetData)
         {
             var packet = new GamePacketReader(packetData);
-            var itemSlot = packet.ReadShort();
 
-            if (client.Tamer.AccountCashWarehouse == null)
-            {
-                _logger.Error($"[Warehouse] AccountCashWarehouse is NULL for Tamer {client.Tamer?.Name ?? "Unknown"}!");
-                return;
-            }
+            var itemSlot = packet.ReadShort();
 
             var targetItem = client.Tamer.AccountCashWarehouse.FindItemBySlot(itemSlot);
 
-            if (targetItem == null)
+            if (targetItem != null)
             {
-                _logger.Warning($"[Warehouse] Item not found in slot {itemSlot} for Tamer {client.Tamer.Name}");
-                return;
-            }
+                var newItem = (ItemModel)targetItem.Clone();
 
-            // Clona para transferir para o inventário
-            var newItem = (ItemModel)targetItem.Clone();
-            newItem.SetItemId(targetItem.ItemId);
-            newItem.SetAmount(targetItem.Amount);
-            newItem.SetItemInfo(targetItem.ItemInfo);
+                newItem.SetItemId(targetItem.ItemId);
+                newItem.SetAmount(targetItem.Amount);
+                newItem.SetItemInfo(targetItem.ItemInfo);
 
-            if (newItem.IsTemporary)
-                newItem.SetRemainingTime((uint)newItem.ItemInfo.UsageTimeMinutes);
+                if (newItem.IsTemporary)
+                    newItem.SetRemainingTime((uint)newItem.ItemInfo.UsageTimeMinutes);
 
-            if (client.Tamer.Inventory.AddItemGiftStorage(newItem))
-            {
-                // Remove do warehouse
-                client.Tamer.AccountCashWarehouse.RemoveItem(targetItem, itemSlot);
-                client.Tamer.AccountCashWarehouse.Sort();
+                if (client.Tamer.Inventory.AddItemGiftStorage(newItem))
+                {
+                    client.Tamer.AccountCashWarehouse.RemoveItem(targetItem, itemSlot);
 
-                // 🔹 Usa o item original no pacote (alguns clients crasham se for o clone)
-                client.Send(new AccountWarehouseItemRetrievePacket(targetItem, itemSlot));
+                    client.Tamer.AccountCashWarehouse.Sort();
 
-                // 🔹 Recarrega warehouse e inventário
-                client.Send(new LoadAccountWarehousePacket(client.Tamer.AccountCashWarehouse));
-                client.Send(new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory));
+                    client.Send(new AccountWarehouseItemRetrievePacket(newItem, itemSlot)); //  Aqui pode ser que o newItem esta errado
 
-                // 🔹 Atualiza DB
-                await _sender.Send(new UpdateItemsCommand(client.Tamer.Inventory));
-                await _sender.Send(new UpdateItemsCommand(client.Tamer.AccountCashWarehouse));
+                    client.Send(new LoadAccountWarehousePacket(client.Tamer.AccountCashWarehouse));
+                    client.Send(new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory));
 
-                _logger.Information($"[Warehouse] Item {targetItem.ItemId} x{targetItem.Amount} retirado do warehouse (slot {itemSlot}) para Tamer {client.Tamer.Name}");
+                    await _sender.Send(new UpdateItemsCommand(client.Tamer.Inventory));
+                    await _sender.Send(new UpdateItemsCommand(client.Tamer.AccountCashWarehouse));
+                }
+                else
+                {
+                    _logger.Warning($"Failed to add item in Inventory!! Tamer {client.Tamer.Name} dont have free slots");
+                }
             }
             else
             {
-                _logger.Warning($"[Warehouse] Falha ao transferir item {targetItem.ItemId} para inventário: sem slots livres (Tamer {client.Tamer.Name})");
+                _logger.Error($"AccountWarehouse Item not found !!");
             }
         }
     }

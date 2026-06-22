@@ -36,22 +36,24 @@ namespace DigitalWorldOnline.Game
 
         private static void UnhandledExceptionHandler(object sender, UnhandledExceptionEventArgs e)
         {
-            if (e.ExceptionObject is Exception exception)
-            {
-                Console.WriteLine("==== Unhandled Exception ====");
-                Console.WriteLine($"Message: {exception.Message}");
-                Console.WriteLine($"StackTrace: {exception.StackTrace}");
-                Console.WriteLine($"Inner: {exception.InnerException}");
-            }
-
+            Console.WriteLine(((Exception)e.ExceptionObject).InnerException);
             if (e.IsTerminating)
             {
-                Console.WriteLine("Terminating due to unhandled exception...");
+                var message = "";
+                var exceptionStackTrace = "";
+                if (e.ExceptionObject is Exception exception) 
+                {
+                    message =  exception.Message;
+                    exceptionStackTrace = exception.StackTrace;
+                }
+                Console.WriteLine($"{message}");
+                Console.WriteLine($"{exceptionStackTrace}");
+                Console.WriteLine("Terminating by unhandled exception...");
             }
             else
-            {
-                Console.WriteLine("Unhandled exception caught, continuing execution...");
-            }
+                Console.WriteLine("Received unhandled exception.");
+
+            Console.ReadLine();
         }
 
         public static IHost CreateHostBuilder(string[] args)
@@ -64,9 +66,10 @@ namespace DigitalWorldOnline.Game
                 .UseEnvironment("Development")
                 .ConfigureServices((context, services) =>
                 {
+                    // 📘 Database Context (Scoped)
                     services.AddDbContext<DatabaseContext>();
 
-                    // ==== Repositories ====
+                    // 📘 Repositories (Scoped)
                     services.AddScoped<IAdminQueriesRepository, AdminQueriesRepository>();
                     services.AddScoped<IAdminCommandsRepository, AdminCommandsRepository>();
 
@@ -84,7 +87,7 @@ namespace DigitalWorldOnline.Game
 
                     services.AddScoped<IRoutineRepository, RoutineRepository>();
 
-                    // ==== Managers ====
+                    // 📘 Managers e Loaders (Singletons — não usam DB diretamente)
                     services.AddSingleton<AssetsLoader>();
                     services.AddSingleton<ConfigsLoader>();
                     services.AddSingleton<DropManager>();
@@ -96,52 +99,50 @@ namespace DigitalWorldOnline.Game
                     services.AddSingleton<DigimonSkillManager>();
                     services.AddSingleton<EventQueueManager>();
 
-                    // ==== Servers ====
+                    // 📘 Servidores principais (Singleton + usam IServiceScopeFactory internamente)
                     services.AddSingleton<MapServer>();
                     services.AddSingleton<PvpServer>();
                     services.AddSingleton<EventServer>();
                     services.AddSingleton<DungeonsServer>();
 
-                    // ==== Commands / Processors ====
+                    // 📘 Outros serviços de lógica de jogo
                     services.AddSingleton<GameMasterCommandsProcessor>();
                     services.AddSingleton<PlayerCommands>();
                     services.AddSingleton<BanForCheating>();
 
-                    // ==== Mediator / CQRS ====
+                    // 📘 Comunicação e processamento de pacotes
                     services.AddSingleton<ISender, ScopedSender<Mediator>>();
+                    services.AddSingleton<IProcessor, GamePacketProcessor>();
+
+                    // Background queue for item updates persistence
+                    services.AddSingleton<DigitalWorldOnline.Application.Separar.Commands.Update.IUpdateItemsBackgroundQueue, DigitalWorldOnline.GameHost.Services.UpdateItemsBackgroundQueue>(sp =>
+                    {
+                    return new DigitalWorldOnline.GameHost.Services.UpdateItemsBackgroundQueue(
+                    sp.GetRequiredService<IServiceScopeFactory>(),
+                    sp.GetRequiredService<Serilog.ILogger>());
+                    });
+                    services.AddHostedService<DigitalWorldOnline.GameHost.Services.BackgroundUpdateItemsService>();
+
+                    // 📘 Logger e Hosted Service principal (GameServer)
+                    services.AddSingleton(ConfigureLogger(context.Configuration));
+                    services.AddHostedService<GameServer>();
+
+                    // 📘 Mediator e AutoMapper
                     services.AddMediatR(typeof(MediatorApplicationHandlerExtension).GetTypeInfo().Assembly);
                     services.AddTransient<Mediator>();
 
-                    // ==== Packet Processor ====
-                    services.AddSingleton<IProcessor, GamePacketProcessor>();
-
-                    // ==== Logging ====
-                    services.AddSingleton(ConfigureLogger(context.Configuration));
-
-                    // ==== Hosted Service ====
-                    services.AddHostedService<GameServer>();
-
-                    // ==== AutoMapper ====
                     AddAutoMapper(services);
-
-                    // ==== Packet Processors dinâmicos ====
                     AddProcessors(services);
                 })
-                .ConfigureAppConfiguration((hostingContext, config) =>
+                .ConfigureHostConfiguration(hostConfig =>
                 {
-                    var env = hostingContext.HostingEnvironment;
-
-                    config.SetBasePath(Directory.GetCurrentDirectory())
-                          .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-                          .AddJsonFile($"appsettings.{env.EnvironmentName}.json", optional: true, reloadOnChange: true)
-                          .AddEnvironmentVariables(Constants.Configuration.EnvironmentPrefix)
-                          .AddUserSecrets<Program>();
+                    hostConfig.SetBasePath(Directory.GetCurrentDirectory())
+                        .AddEnvironmentVariables(Constants.Configuration.EnvironmentPrefix)
+                        .AddUserSecrets<Program>();
                 })
                 .Build();
 
-            // Resolver global
             SingletonResolver.Services = host.Services;
-
             return host;
         }
 
@@ -164,16 +165,14 @@ namespace DigitalWorldOnline.Game
                 .Where(t => typeof(IGamePacketProcessor).IsAssignableFrom(t) && !t.IsInterface)
                 .ToList();
 
-            foreach (var processor in packetProcessors)
-                services.AddSingleton(typeof(IGamePacketProcessor), processor);
+            packetProcessors.ForEach(processor => { services.AddSingleton(typeof(IGamePacketProcessor), processor); });
         }
 
         private static ILogger ConfigureLogger(IConfiguration configuration)
         {
             return new LoggerConfiguration()
                 .MinimumLevel.Verbose()
-                .WriteTo.Console(
-                    outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}",
+                .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}",
                     restrictedToMinimumLevel: LogEventLevel.Information)
                 .WriteTo.Logger(lc => lc
                     .Filter.ByIncludingOnly(e => e.Level == LogEventLevel.Verbose)

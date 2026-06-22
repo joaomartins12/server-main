@@ -1,5 +1,4 @@
-﻿using DigitalWorldOnline.Commons.DTOs.Assets;
-using DigitalWorldOnline.Commons.DTOs.Character;
+﻿using DigitalWorldOnline.Commons.DTOs.Character;
 using DigitalWorldOnline.Commons.DTOs.Digimon;
 
 namespace DigitalWorldOnline.Commons.Interfaces
@@ -25,8 +24,5 @@ namespace DigitalWorldOnline.Commons.Interfaces
         Task<(string TamerName, string GuildName)> GetCharacterNameAndGuildByIdQAsync(long characterId);
         
         Task<IList<CharacterEncyclopediaDTO>> GetCharacterEncyclopediaByCharacterIdAsync(long characterId);
-
-        Task<DigimonBaseInfoAssetDTO?> GetBaseInfoByTypeAsync(int type);
-
     }
 }

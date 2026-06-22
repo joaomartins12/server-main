@@ -11,7 +11,7 @@ namespace DigitalWorldOnline.Commons.Utils
         public static List<short> DungeonMapIds = new List<short>()
         {
             1, 13, 17, 18, 50, 51, 10, 20, 89, 94, 99, 102, 103, 205, 213, 210, 211, 212, 213, 214, 215, 252, 253, 264, 267, 268, 269, 270, 1110, 1111, 1112, 1304, 1308, 1310, 1311, 1403,
-            1404, 1406, 1500, 1502, 1600, 1601, 1602, 1603, 1604, 1605, 1606, 1607, 1608, 1609, 1610, 1611, 1612, 1613, 1614,
+            1404, 1406, 1503, 1600, 1601, 1602, 1603, 1604, 1605, 1606, 1607, 1608, 1609, 1610, 1611, 1612, 1613, 1614,
             1615, 1701, 1702, 1703, 1704, 1705, 1706, 1809, 1810, 1911, 1912, 1914, 1915, 2001, 2002
         };
 
@@ -535,9 +535,17 @@ namespace DigitalWorldOnline.Commons.Utils
             {
                 return 2; // 1109 -> Dark Tower Wasteland
             }
-            else if (mapId is >= 1500 and <= 1502)
+            else if (mapId == 1500)
             {
-                return 2; // GreenZone
+                return 1500; // GreenZone
+            }
+            else if (mapId == 1501)
+            {
+                return 1501; // MisoVillage
+            }
+            else if (mapId == 1503)
+            {
+                return 1501; // DarknessBagramon Dungeon
             }
             else if (mapId == 1701)
             {

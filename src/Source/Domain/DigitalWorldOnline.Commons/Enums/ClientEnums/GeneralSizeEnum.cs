@@ -73,7 +73,7 @@
         /// <summary>
         /// Max size for tamer warehouse.
         /// </summary>
-        WarehouseMax = 350,
+        WarehouseMax = 245,
 
         /// <summary>
         /// Initial account warehouse size.
@@ -257,7 +257,7 @@
         /// <summary>
         /// Warehouse maximum slot value.
         /// </summary>
-        WarehouseMaxSlot = 2349,
+        WarehouseMaxSlot = 2315,
 
         /// <summary>
         /// Account warehouse minimal slot value.

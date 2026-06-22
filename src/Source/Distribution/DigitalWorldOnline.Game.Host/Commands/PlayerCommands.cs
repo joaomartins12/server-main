@@ -73,7 +73,6 @@ namespace DigitalWorldOnline.Game
                 { "stats", (StatsCommand, null) },
                 { "time", (TimeCommand, null) },
                 { "deckload", (DeckLoadCommand, null) },
-                { "pvp", (PvpCommand, new List<AccountAccessLevelEnum> { AccountAccessLevelEnum.Vip, AccountAccessLevelEnum.Vip2, AccountAccessLevelEnum.Vip3, AccountAccessLevelEnum.Vip4, AccountAccessLevelEnum.Vip5 }) },
                 { "help", (HelpCommand, null) },
                 { "critical", (CriticalCommand, null) },
                 { "timeboss", (TimeBossCommand, null) },
@@ -85,27 +84,56 @@ namespace DigitalWorldOnline.Game
 
         private async Task battleCommand(GameClient client, string[] command)
         {
-            var tamer = client.Tamer;
-
-            // Força a remoção do estado de batalha
-            tamer.InBattle = false;
-            tamer.TargetMobs.Clear();
-            tamer.StopBattle();
-
-            // Remove mobs que possam estar marcando o Tamer como alvo (garantia extra)
-            foreach (var mob in _mapServer.Maps.FirstOrDefault(map => map.MapId == tamer.Location.MapId)?.Mobs ?? Enumerable.Empty<MobConfigModel>())
+            try
             {
-                mob.TargetTamers.RemoveAll(x => x.Id == tamer.Id);
+                client.Send(new SystemMessagePacket("Attempting to remove combat state...").Serialize());
+
+                // Stop combat locally
+                client.Tamer.StopBattle(true);
+                client.Tamer.StopIBattle();
+
+                // Re-send SetCombatOffPacket several times to ensure client sync
+                _ = Task.Run(async () =>
+                {
+                    const int maxAttempts = 5;
+                    const int delayMs = 200; // 0.2s between attempts
+
+                    for (int i = 1; i <= maxAttempts; i++)
+                    {
+                        try
+                        {
+                            client.Send(new SetCombatOffPacket(client.Partner.GeneralHandler).Serialize());
+                            _logger.Debug($"[Unstuck] Sent SetCombatOff attempt {i}/{maxAttempts} for CharacterId={client.Tamer.Id}");
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.Warning($"[Unstuck] Error sending SetCombatOff attempt {i}: {ex.Message}");
+                        }
+
+                        await Task.Delay(delayMs);
+
+                        if (!client.Tamer.InBattle)
+                        {
+                            _logger.Debug($"[Unstuck] CombatOff confirmed after {i} attempts for CharacterId={client.Tamer.Id}");
+                            break;
+                        }
+                    }
+
+                    // Force combat off if still stuck after all attempts
+                    if (client.Tamer.InBattle)
+                    {
+                        client.Tamer.StopIBattle();
+                        _logger.Warning($"[Unstuck] Forced CombatOff after all attempts for CharacterId={client.Tamer.Id}");
+                    }
+                });
+
+                client.Send(new SystemMessagePacket("Combat state cleared successfully.").Serialize());
             }
-
-            // Envia o pacote para o próprio jogador
-            client.Send(new SetCombatOffPacket(tamer.Partner.GeneralHandler).Serialize());
-
-            // E também envia para os outros ao redor (se quiser)
-            _mapServer.BroadcastForTamerViewsAndSelf(tamer.Id,
-                new SetCombatOffPacket(tamer.Partner.GeneralHandler).Serialize());
-
-            client.Send(new NoticeMessagePacket("Modo de combate forcado foi removido."));
+            catch (Exception ex)
+            {
+                _logger.Error($"[Unstuck] Exception while executing command for CharacterId={client?.Tamer?.Id}: {ex.Message}");
+                client.Send(new SystemMessagePacket("An error occurred while trying to clear combat state.").Serialize());
+            }
         }
 
 
@@ -137,7 +165,7 @@ namespace DigitalWorldOnline.Game
                         continue;
 
                     var formattedRespawn = $"{(int)(remaining / 60):D2}:{(int)(remaining % 60):D2}";
-                    var message = $"[{map.Name} CH{map.Channel}] {mob.Name} - Respawn em {formattedRespawn} (Morreu às {mob.DeathTime.Value:HH:mm:ss}, volta às {mob.ResurrectionTime.Value:HH:mm:ss})";
+                    var message = $"[{map.Name} CH{map.Channel}] {mob.Name} - Respawn in {formattedRespawn} (Died at {mob.DeathTime.Value:HH:mm:ss}, back to {mob.ResurrectionTime.Value:HH:mm:ss})";
 
                     bossList.Add(message);
                 }
@@ -145,11 +173,11 @@ namespace DigitalWorldOnline.Game
 
             if (!bossList.Any())
             {
-                client.Send(new SystemMessagePacket("Nenhum boss aguardando respawn no seu mapa atual."));
+                client.Send(new SystemMessagePacket("No bosses waiting to respawn on your current map."));
                 return;
             }
 
-            client.Send(new SystemMessagePacket("Bosses aguardando respawn no seu mapa:"));
+            client.Send(new SystemMessagePacket("Bosses waiting to respawn on your map:"));
             foreach (var boss in bossList)
             {
                 client.Send(new SystemMessagePacket(boss));
@@ -167,7 +195,7 @@ namespace DigitalWorldOnline.Game
             var mapConfig = await _sender.Send(new GameMapConfigByMapIdQuery(client.Tamer.Location.MapId));
             if (mapConfig.Type == MapTypeEnum.Dungeon)
             {
-                client.Send(new SystemMessagePacket("Este comando nao pode ser usado dentro de uma Dungeon."));
+                client.Send(new SystemMessagePacket("This command cannot be used inside a Dungeon."));
                 return;
             }
 
@@ -249,7 +277,7 @@ namespace DigitalWorldOnline.Game
             int slotsVazios = inventory.Items.Count(x => x.ItemId == 0);
             if (slotsNecessarios > slotsVazios)
             {
-                client.Send(new SystemMessagePacket("Seu inventario nao possui espaço suficiente para receber todos os itens especiais de skill. Libere espaço antes de usar este comando."));
+                client.Send(new SystemMessagePacket("Your inventory does not have enough space to hold all special skill items. Free up space before using this command."));
                 return;
             }
             // --- FIM DA VERIFICAÇÃO DE ESPAÇO ---
@@ -324,7 +352,7 @@ namespace DigitalWorldOnline.Game
                     int emptySlot = inventory.GetEmptySlot;
                     if (emptySlot == -1)
                     {
-                        client.Send(new SystemMessagePacket("Seu inventario esta cheio. Nao foi possível entregar todos os itens especiais."));
+                        client.Send(new SystemMessagePacket("Your inventory is full. It was not possible to deliver all special items."));
                         break;
                     }
 
@@ -366,10 +394,10 @@ namespace DigitalWorldOnline.Game
                     client.Send(new SystemMessagePacket($"{mensagem} ({entregues}x)"));
             }
 
-            await EntregarItemEspecial(59063, evosComSkillsLv10, "Parabens! Voce recebeu o item especial por ter todas as skills de uma evolucao no level 10!");
-            await EntregarItemEspecial(59064, evosComSkillsLv15, "Parabens! Voce recebeu o item especial por ter todas as skills de uma evolucao no level 15!");
-            await EntregarItemEspecial(59065, evosComSkillsLv20, "Parabens! Voce recebeu o item especial por ter todas as skills de uma evolucao no level 20!");
-            await EntregarItemEspecial(59066, evosComSkillsLv25, "Parabens! Voce recebeu o item especial por ter todas as skills de uma evolucao no level 25!");
+            await EntregarItemEspecial(59063, evosComSkillsLv10, "Congratulations! You have received the special item for having all the skills of a level 10 evolution!");
+            await EntregarItemEspecial(59064, evosComSkillsLv15, "Congratulations! You have received a special item for having all the skills of a level 15 evolution!");
+            await EntregarItemEspecial(59065, evosComSkillsLv20, "Congratulations! You have received the special item for having all the skills of a level 20 evolution!");
+            await EntregarItemEspecial(59066, evosComSkillsLv25, "Congratulations! You have received the special item for having all the skills of a level 25 evolution!");
 
             // RELOAD automático após atualizar as evoluções
             client.Tamer.UpdateState(CharacterStateEnum.Loading);
@@ -399,7 +427,7 @@ namespace DigitalWorldOnline.Game
                 client.Tamer.Location.Y
             ));
 
-            client.Send(new SystemMessagePacket("Evolucoes e montarias restauradas com sucesso!"));
+            client.Send(new SystemMessagePacket("Evolutions and mounts successfully restored!"));
         }
 
 
@@ -466,7 +494,7 @@ namespace DigitalWorldOnline.Game
 
             if (!matchingItems.Any())
             {
-                client.Send(new SystemMessagePacket("Nenhum item com esse nome encontrado no seu mapa atual."));
+                client.Send(new SystemMessagePacket("No items with that name found on your current map."));
                 return;
             }
 
@@ -474,7 +502,7 @@ namespace DigitalWorldOnline.Game
 
             const int MaxMessageLength = 250;
             var messages = new List<string>();
-            var currentMsg = "Item encontrado (Ordenado por valor):\n";
+            var currentMsg = "Item found (Sorted by value):\n";
 
             foreach (var match in matchingItems)
             {
@@ -543,15 +571,15 @@ namespace DigitalWorldOnline.Game
 
             if (!match.Success)
             {
-                client.Send(new SystemMessagePacket($"Comando inválido. Use: !critical (on/off)."));
+                client.Send(new SystemMessagePacket($"Invalid command. Use: !critical (on/off)."));
                 return;
             }
 
             bool enable = match.Groups[1].Value.Equals("on", StringComparison.OrdinalIgnoreCase);
             client.EnableCriticalMessages = enable;
 
-            string status = enable ? "habilitadas" : "desabilitadas";
-            client.Send(new SystemMessagePacket($"Mensagens de crítico {status}."));
+            string status = enable ? "Active" : "Disabled";
+            client.Send(new SystemMessagePacket($"Critical messages: {status}."));
         }
         public async Task ExecuteCommand(GameClient client, string message)
         {

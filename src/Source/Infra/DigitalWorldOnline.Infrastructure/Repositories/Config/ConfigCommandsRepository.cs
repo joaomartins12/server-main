@@ -24,24 +24,33 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Config
         public async Task<UserDTO?> AddAdminUserAsync(AdminUserModel user)
         {
             var dto = _mapper.Map<UserDTO>(user);
+
             _context.Add(dto);
+
             await _context.SaveChangesAsync();
+
             return dto;
         }
 
         public async Task<ConsignedShopDTO?> AddConsignedShopAsync(ConsignedShop personalShop)
         {
             var dto = _mapper.Map<ConsignedShopDTO>(personalShop);
+
             _context.CharacterConsignedShop.Add(dto);
+
             await _context.SaveChangesAsync();
+
             return dto;
         }
 
         public async Task<ServerDTO?> AddServerAsync(ServerObject server)
         {
             var dto = _mapper.Map<ServerDTO>(server);
+
             _context.ServerConfig.Add(dto);
+
             await _context.SaveChangesAsync();
+
             return dto;
         }
 
@@ -53,7 +62,8 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Config
             if (dto != null)
             {
                 _context.Remove(dto);
-                await _context.SaveChangesAsync();
+
+                await _context.SaveChangesAsync();;
             }
         }
 
@@ -64,13 +74,14 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Config
             if (dto != null)
             {
                 _context.Remove(dto);
-                await _context.SaveChangesAsync();
+                await _context.SaveChangesAsync();;
             }
         }
 
         public async Task DeleteMobConfigAsync(long id)
         {
-            var dto = await _context.MobConfig.FirstOrDefaultAsync(x => x.Id == id);
+            var dto = await _context.MobConfig
+                .FirstOrDefaultAsync(x => x.Id == id);
 
             if (dto != null)
             {
@@ -85,7 +96,7 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Config
                 }
 
                 _context.Remove(dto);
-                await _context.SaveChangesAsync();
+                await _context.SaveChangesAsync();;
             }
         }
 
@@ -95,17 +106,15 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Config
 
             if (dto != null)
             {
-                var chars = await _context.Character.CountAsync(x => x.ServerId == id);
+                var chars = _context.Character.Count(x => x.ServerId == id);
 
-                if (chars == 0)
+                if (chars == default)
                 {
                     _context.Remove(dto);
-                    await _context.SaveChangesAsync();
+                    await _context.SaveChangesAsync();;
                 }
                 else
-                {
                     return false;
-                }
             }
 
             return true;
@@ -113,24 +122,26 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Config
 
         public async Task UpdateAdminUserAsync(AdminUserModel user)
         {
-            var dto = await _context.UserConfig.FirstOrDefaultAsync(x => x.Id == user.Id);
+            var dto = await _context.UserConfig
+                .FirstOrDefaultAsync(x => x.Id == user.Id);
 
             if (dto != null)
             {
                 dto.AccessLevel = user.AccessLevel;
                 _context.Update(dto);
-                await _context.SaveChangesAsync();
+                await _context.SaveChangesAsync();;
             }
         }
 
         public async Task DeleteAdminUserAsync(long id)
         {
-            var dto = await _context.UserConfig.FirstOrDefaultAsync(x => x.Id == id);
+            var dto = await _context.UserConfig
+                .FirstOrDefaultAsync(x => x.Id == id);
 
             if (dto != null)
             {
                 _context.Remove(dto);
-                await _context.SaveChangesAsync();
+                await _context.SaveChangesAsync();;
             }
         }
 
@@ -143,32 +154,28 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Config
                 dto.MapId = mapConfig.MapId;
                 dto.Name = mapConfig.Name;
 
-                // ⚠️ cuidado: isto substitui toda a lista de mobs
                 dto.Mobs = _mapper.Map<List<MobConfigDTO>>(mapConfig.Mobs);
 
                 _context.Update(dto);
-                await _context.SaveChangesAsync();
+
+                await _context.SaveChangesAsync();;
             }
         }
 
         public async Task UpdateMobConfigAsync(MobConfigModel mobConfig)
         {
             var dto = await _context.MobConfig
-                .AsNoTracking()
-                .Include(x => x.ExpReward)
-                .Include(x => x.DropReward)
-                .Include(x => x.Location)
-                .FirstOrDefaultAsync(x => x.Id == mobConfig.Id);
+            .Include(x => x.ExpReward)
+            .Include(x => x.DropReward)
+            .Include(x => x.Location)
+            .FirstOrDefaultAsync(x => x.Id == mobConfig.Id);
 
-            if (dto != null)
-            {
-                var gameMapConfigId = dto.GameMapConfigId;
-                dto = _mapper.Map<MobConfigDTO>(mobConfig);
-                dto.GameMapConfigId = gameMapConfigId;
+            if (dto == null)
+                return;
 
-                _context.Update(dto);
-                await _context.SaveChangesAsync();
-            }
+            _mapper.Map(mobConfig, dto); // mapeia direto sobre o objeto já trackeado
+            await _context.SaveChangesAsync();
+
         }
 
         public async Task UpdateServerAsync(long serverId, string serverName, int experience, bool maintenance)
@@ -182,7 +189,7 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Config
                 dto.Maintenance = maintenance;
 
                 _context.Update(dto);
-                await _context.SaveChangesAsync();
+                await _context.SaveChangesAsync();;
             }
         }
     }

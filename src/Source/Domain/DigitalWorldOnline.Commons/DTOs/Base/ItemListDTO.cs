@@ -17,7 +17,7 @@ namespace DigitalWorldOnline.Commons.DTOs.Base
         /// <summary>
         /// Current item list slots amount.
         /// </summary>
-        public short Size { get; set; }
+        public byte Size { get; set; }
 
         /// <summary>
         /// Item list bits.

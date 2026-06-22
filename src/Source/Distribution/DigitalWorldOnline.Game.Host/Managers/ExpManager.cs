@@ -98,7 +98,7 @@ namespace DigitalWorldOnline.Game.Managers
                 }
             }
 
-          
+
 
             return new ReceiveExpResult(levelGain, true);
         }
@@ -153,7 +153,7 @@ namespace DigitalWorldOnline.Game.Managers
                     }
                 }
 
-         
+
 
                 return new ReceiveExpResult(levelGain, true);
 
@@ -202,7 +202,7 @@ namespace DigitalWorldOnline.Game.Managers
             }
 
             int currentExp = partner.GetAttributeExperience();
-            int maxExpGain = Math.Max(0,10000 - currentExp);
+            int maxExpGain = Math.Max(0, 10000 - currentExp);
 
             if (experience > maxExpGain)
             {
@@ -210,12 +210,12 @@ namespace DigitalWorldOnline.Game.Managers
             }
 
             partner.ReceiveNatureExp(experience);
-            
-            var a = Enum.Parse(typeof(DigimonAttributePacketEnum),partner.BaseInfo.Attribute.ToString());
+
+            var a = Enum.Parse(typeof(DigimonAttributePacketEnum), partner.BaseInfo.Attribute.ToString());
 
             if (partner.BaseInfo.Attribute != DigimonAttributeEnum.Data)
             {
-                client.Send(new NatureExpPacket(0,(byte)(int)a,experience));
+                client.Send(new NatureExpPacket(0, (byte)(int)a, experience));
             }
         }
 
@@ -237,7 +237,7 @@ namespace DigitalWorldOnline.Game.Managers
             }
 
             int currentExp = partner.GetAttributeExperience();
-            int maxExpGain = Math.Max(0,10000 - currentExp);
+            int maxExpGain = Math.Max(0, 10000 - currentExp);
 
             if (experience > maxExpGain)
             {
@@ -245,11 +245,11 @@ namespace DigitalWorldOnline.Game.Managers
             }
 
             partner.ReceiveNatureExp(experience);
-            
-            var a = Enum.Parse(typeof(DigimonAttributePacketEnum),partner.BaseInfo.Attribute.ToString());
+
+            var a = Enum.Parse(typeof(DigimonAttributePacketEnum), partner.BaseInfo.Attribute.ToString());
             if (partner.BaseInfo.Attribute != DigimonAttributeEnum.Data)
             {
-                client.Send(new NatureExpPacket(0,(byte)(int)a,experience));
+                client.Send(new NatureExpPacket(0, (byte)(int)a, experience));
             }
 
         }
@@ -274,7 +274,7 @@ namespace DigitalWorldOnline.Game.Managers
             }
 
             int currentExp = partner.GetElementExperience();
-            int maxExpGain = Math.Max(0,10000 - currentExp);
+            int maxExpGain = Math.Max(0, 10000 - currentExp);
 
             if (experience > maxExpGain)
             {
@@ -282,9 +282,9 @@ namespace DigitalWorldOnline.Game.Managers
             }
 
             partner.ReceiveElementExp(experience);
-            
-            var e = Enum.Parse(typeof(DigimonElementPacketEnum),partner.BaseInfo.Element.ToString());
-            client.Send(new NatureExpPacket(1,(byte)(int)e,experience));
+
+            var e = Enum.Parse(typeof(DigimonElementPacketEnum), partner.BaseInfo.Element.ToString());
+            client.Send(new NatureExpPacket(1, (byte)(int)e, experience));
 
         }
 
@@ -307,7 +307,7 @@ namespace DigitalWorldOnline.Game.Managers
             }
 
             int currentExp = partner.GetElementExperience();
-            int maxExpGain = Math.Max(0,10000 - currentExp);
+            int maxExpGain = Math.Max(0, 10000 - currentExp);
 
             if (experience > maxExpGain)
             {
@@ -315,8 +315,8 @@ namespace DigitalWorldOnline.Game.Managers
             }
 
             partner.ReceiveElementExp(experience);
-            var e = Enum.Parse(typeof(DigimonElementPacketEnum),partner.BaseInfo.Element.ToString());
-            client.Send(new NatureExpPacket(1,(byte)(int)e,experience));
+            var e = Enum.Parse(typeof(DigimonElementPacketEnum), partner.BaseInfo.Element.ToString());
+            client.Send(new NatureExpPacket(1, (byte)(int)e, experience));
         }
 
         // --------------------------------------------------------------------------------------------

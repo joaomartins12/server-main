@@ -1,10 +1,8 @@
-﻿@using MudBlazor
-
-<MudNavMenu Class="navmenu-dark">
+﻿<MudNavMenu>
 
     <!-- Dashboard -->
-    <MudText Typo="Typo.subtitle2" Class="mt-4 ml-2 section-title" Color="Color.Primary">Dashboard</MudText>
-    <MudNavGroup Icon="@Icons.Material.Filled.Dashboard" Dense="true" Expanded="true">
+    <MudText Typo="Typo.subtitle2" Class="mt-4 ml-2" Color="Color.Primary">Dashboard</MudText>
+    <MudNavGroup Icon="@Icons.Material.Filled.Dashboard" Expanded="true">
         <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Home">Overview</MudNavLink>
         <AuthorizeView>
             <MudNavLink Href="/downloads" Icon="@Icons.Material.Filled.Download">Downloads</MudNavLink>
@@ -14,8 +12,8 @@
     <!-- Player Management -->
     <AuthorizeView Roles="Administrator,GameMaster">
         <Authorized>
-            <MudText Typo="Typo.subtitle2" Class="mt-4 ml-2 section-title" Color="Color.Primary">Contas e tamers</MudText>
-            <MudNavGroup Icon="@Icons.Material.Filled.People" Dense="true">
+            <MudText Typo="Typo.subtitle2" Class="mt-4 ml-2" Color="Color.Primary">Contas e tamers</MudText>
+            <MudNavGroup Icon="@Icons.Material.Filled.People">
                 <MudNavLink Href="/players" Icon="@Icons.Material.Filled.Person">Players</MudNavLink>
                 <MudNavLink Href="/accounts" Icon="@Icons.Material.Filled.AccountBox">Game Accounts</MudNavLink>
                 <MudNavLink Href="/users" Icon="@Icons.Material.Filled.ManageAccounts">Admin Users</MudNavLink>
@@ -26,8 +24,8 @@
     <!-- Game Content -->
     <AuthorizeView Roles="Administrator,GameMaster">
         <Authorized>
-            <MudText Typo="Typo.subtitle2" Class="mt-4 ml-2 section-title" Color="Color.Primary">Recursos do jogo</MudText>
-            <MudNavGroup Icon="@Icons.Material.Filled.Extension" Dense="true">
+            <MudText Typo="Typo.subtitle2" Class="mt-4 ml-2" Color="Color.Primary">Recursos do jogo</MudText>
+            <MudNavGroup Icon="@Icons.Material.Filled.Extension">
                 <MudNavLink Href="/mobs" Icon="@Icons.Material.Filled.Pets">Mobs</MudNavLink>
                 <MudNavLink Href="/hatchs" Icon="@Icons.Material.Filled.Egg">Hatching</MudNavLink>
                 <MudNavLink Href="/clones" Icon="@Icons.Material.Filled.ContentCopy">Clones</MudNavLink>
@@ -44,8 +42,8 @@
     <!-- Game Tools -->
     <AuthorizeView Roles="Administrator,GameMaster">
         <Authorized>
-            <MudText Typo="Typo.subtitle2" Class="mt-4 ml-2 section-title" Color="Color.Primary">Game Tools</MudText>
-            <MudNavGroup Icon="@Icons.Material.Filled.Build" Dense="true">
+            <MudText Typo="Typo.subtitle2" Class="mt-4 ml-2" Color="Color.Primary">Game Tools</MudText>
+            <MudNavGroup Icon="@Icons.Material.Filled.Build">
                 <MudNavLink Href="/mobs" Icon="@Icons.Material.Filled.Pets">Mobs</MudNavLink>
                 <MudNavLink Href="/hatchs" Icon="@Icons.Material.Filled.Egg">Hatching</MudNavLink>
                 <MudNavLink Href="/clones" Icon="@Icons.Material.Filled.ContentCopy">Clones</MudNavLink>
@@ -59,11 +57,12 @@
         </Authorized>
     </AuthorizeView>
 
+
     <!-- System Settings -->
     <AuthorizeView Roles="Administrator">
         <Authorized>
-            <MudText Typo="Typo.subtitle2" Class="mt-4 ml-2 section-title" Color="Color.Primary">System Settings</MudText>
-            <MudNavGroup Icon="@Icons.Material.Filled.Settings" Dense="true">
+            <MudText Typo="Typo.subtitle2" Class="mt-4 ml-2" Color="Color.Primary">System Settings</MudText>
+            <MudNavGroup Icon="@Icons.Material.Filled.Settings">
                 <MudNavLink Href="/servers" Icon="@Icons.Material.Filled.Dns">Servers</MudNavLink>
                 <MudNavLink Href="/logs" Icon="@Icons.Material.Filled.Description">Logs</MudNavLink>
             </MudNavGroup>
@@ -71,35 +70,3 @@
     </AuthorizeView>
 
 </MudNavMenu>
-
-<style>
-    /* Fundo do menu um toque MAIS ESCURO que o Drawer do tema (#0B1220) */
-    .navmenu-dark {
-        background-color: #0A0F1A;
-        min-height: 100%;
-        padding-bottom: 12px;
-    }
-
-        /* títulos das secções: ligeiro destaque e espaçamento */
-        .navmenu-dark .section-title {
-            letter-spacing: .2px;
-            opacity: .95;
-        }
-
-        /* links/grupos com cantos arredondados para não “colar” ao fundo */
-        .navmenu-dark .mud-nav-group,
-        .navmenu-dark .mud-nav-link {
-            border-radius: 8px;
-        }
-
-            /* hover/seleção com tom ainda mais escuro para feedback */
-            .navmenu-dark .mud-nav-link:hover,
-            .navmenu-dark .mud-nav-link.mud-selected {
-                background-color: #111a2a;
-            }
-
-        /* opcional: separar blocos com uma linha subtil */
-        .navmenu-dark .mud-nav-group {
-            margin: 4px 6px;
-        }
-</style>

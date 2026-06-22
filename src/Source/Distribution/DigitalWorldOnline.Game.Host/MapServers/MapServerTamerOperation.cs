@@ -76,10 +76,6 @@ namespace DigitalWorldOnline.GameHost
         // 2) Visibilidade de mobs, tamer e shop
         private void ProcessVisibility(GameMap map, CharacterModel tamer, GameClient client)
         {
-            // 🔸 Força um sync de shops ao entrar/recarregar (primeiros ticks)
-            if (tamer.MobsInView.Count == 0)
-                ForceShopsync(map, tamer);
-
             GetInViewMobs(map, tamer);
             ShowOrHideTamer(map, tamer);
             ShowOrHideConsignedShop(map, tamer);
@@ -88,13 +84,52 @@ namespace DigitalWorldOnline.GameHost
         // 3) Ataques automáticos
         private void ProcessAttacks(CharacterModel tamer, GameClient client)
         {
-            if (tamer.TargetIMobs.Count > 0)
+            if (tamer.TargetIMobs.Count >0)
                 PartnerAutoAttackMob(client);
 
             if (tamer.TargetPartner != null)
             {
                 tamer.StopBattle();
                 tamer.Partner?.StopAutoAttack();
+            }
+
+            // New: always validate battle consistency and force stop if no real targets are alive
+            EnsureBattleConsistency(tamer, client);
+        }
+
+        // Ensures the InBattle flag matches real targets state. If no valid targets are alive, stop battle and sync client.
+        private void EnsureBattleConsistency(CharacterModel tamer, GameClient? client)
+        {
+            try
+            {
+                if (tamer == null || client == null) return;
+
+                if (!tamer.InBattle) return;
+
+                bool hasAliveMobTarget = (tamer.TargetMobs?.Any(x => x != null && !x.Dead) ?? false) ||
+                                         (tamer.TargetIMobs?.Any(x => x != null && !x.Dead) ?? false) ||
+                                         (tamer.TargetSummonMobs?.Any(x => x != null && !x.Dead) ?? false);
+
+                bool hasAlivePartnerTarget = (tamer.TargetPartners?.Any(x => x != null && x.Alive) ?? false);
+
+                // If no targets alive, clear battle state and notify viewers
+                if (!hasAliveMobTarget && !hasAlivePartnerTarget)
+                {
+                    _logger?.Verbose($"[EnsureBattleConsistency] Clearing battle for Tamer {tamer.Id} - no alive targets.");
+                    tamer.StopAllBattles();
+
+                    // Ensure visual OFF for partner and character
+                    try
+                    {
+                        BroadcastForTamerViewsAndSelf(tamer.Id, new SetCombatOffPacket(tamer.Partner.GeneralHandler).Serialize());
+                        BroadcastForTamerViewsAndSelf(tamer.Id, new SetCombatOffPacket(tamer.GeneralHandler).Serialize());
+                    }
+                    catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.Warning($"[EnsureBattleConsistency] Error checking battle consistency for Tamer {tamer?.Id}: {ex.Message}");
             }
         }
 
@@ -1396,6 +1431,5 @@ namespace DigitalWorldOnline.GameHost
                 ShowOrHideTamer(map, tamer);
             }
         }
-
     }
 }

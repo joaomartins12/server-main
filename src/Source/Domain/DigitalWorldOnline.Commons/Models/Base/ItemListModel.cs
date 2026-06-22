@@ -1,8 +1,5 @@
 ﻿using DigitalWorldOnline.Commons.Enums;
 using DigitalWorldOnline.Commons.Enums.ClientEnums;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace DigitalWorldOnline.Commons.Models.Base
 {
@@ -21,12 +18,12 @@ namespace DigitalWorldOnline.Commons.Models.Base
         /// <summary>
         /// Current item list slots amount.
         /// </summary>
-        public short Size { get; set; }
+        public byte Size { get; private set; }
 
         /// <summary>
         /// Item list bits.
         /// </summary>
-        public long Bits { get; set; }
+        public long Bits { get;  set; }
 
         /// <summary>
         /// Items inside the list.
@@ -38,6 +35,7 @@ namespace DigitalWorldOnline.Commons.Models.Base
         public ItemListModel(ItemListEnum type)
         {
             Items = new List<ItemModel>();
+
             Type = type;
 
             switch (Type)
@@ -111,37 +109,8 @@ namespace DigitalWorldOnline.Commons.Models.Base
                     break;
             }
 
-            // Garante slots 0..Size-1 (sem -1)
-            for (short i = 0; i < Size; i++)
-                Items.Add(new ItemModel(i));
-        }
-
-        /// <summary>
-        /// Converte a lista de itens em array de bytes para envio ao cliente.
-        /// Sempre devolve exatamente Size slots (até 350).
-        /// </summary>
-        public byte[] ToPacketArray()
-        {
-            var buffer = new List<byte>();
-
-            // Clonar estado atual em dicionário para lookup rápido
-            var itemBySlot = Items.ToDictionary(x => x.Slot, x => x);
-
-            for (short slot = 0; slot < Size; slot++)
-            {
-                if (itemBySlot.TryGetValue(slot, out var item) && item != null && item.ItemId > 0)
-                {
-                    buffer.AddRange(item.ToArray()); // Item válido
-                }
-                else
-                {
-                    // Slot vazio → placeholder válido
-                    var empty = new ItemModel(slot);
-                    buffer.AddRange(empty.ToArray());
-                }
-            }
-
-            return buffer.ToArray();
+            for (var i = 0; i < Size; i++)
+                Items.Add(new ItemModel(Items.Any() ? Items.Max(x => x.Slot) : -1));
         }
     }
 }

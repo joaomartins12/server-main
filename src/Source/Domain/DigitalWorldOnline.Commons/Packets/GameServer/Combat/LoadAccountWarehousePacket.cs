@@ -13,9 +13,14 @@ namespace DigitalWorldOnline.Commons.Packets.GameServer.Combat
         {
             Type(PacketNumber);
 
-            WriteShort((short)accountWarehouse.Items.Count); // ✅ voltar ao original
-            WriteBytes(accountWarehouse.Items.SelectMany(x => x.ToArray()).ToArray());
-        }
+            if (accountWarehouse == null)
+            {
+                WriteShort(0);
+                return;
+            }
 
+            WriteShort((short)accountWarehouse.Count);
+            WriteBytes(accountWarehouse.ToArray());
+        }
     }
 }

@@ -608,7 +608,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             }
             else if (targetItem.ItemInfo.Section == 9012)
             {
-                await UltraAscension(client,itemSlot,targetItem);
+                await UltraAscension(client, itemSlot, targetItem);
             }
             else if (targetItem.ItemInfo.Type == 155)
             {
@@ -653,7 +653,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             else
                 client.Send(new ItemConsumeFailPacket(itemSlot, targetItem.ItemInfo.Type));
         }
-        private async Task UltraAscension(GameClient client,short itemSlot,ItemModel targetItem)
+        private async Task UltraAscension(GameClient client, short itemSlot, ItemModel targetItem)
         {
 
             var digimonLevel = client.Partner.HatchGrade;
@@ -664,7 +664,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 case DigimonHatchGradeEnum.Transcend:
                     if (digimonSize < 13900)
                     {
-                        await HandleFailure(client,itemSlot,targetItem);
+                        await HandleFailure(client, itemSlot, targetItem);
                         return;
                     }
                     client.Tamer.Partner.Ascended();
@@ -703,48 +703,48 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 //    break;
 
                 default:
-                    await HandleFailure(client,itemSlot,targetItem);
+                    await HandleFailure(client, itemSlot, targetItem);
                     client.Send(new NoticeMessagePacket("Your digimon is at MAX level"));
                     return;
 
             }
 
-            await HandleEvolution(client,itemSlot,targetItem);
+            await HandleEvolution(client, itemSlot, targetItem);
         }
-        private async Task HandleEvolution(GameClient client,short itemSlot,ItemModel targetItem)
+        private async Task HandleEvolution(GameClient client, short itemSlot, ItemModel targetItem)
         {
-            client.Tamer.Inventory.RemoveOrReduceItem(targetItem,1);
+            client.Tamer.Inventory.RemoveOrReduceItem(targetItem, 1);
 
             await _sender.Send(new UpdateItemCommand(targetItem));
-            await _sender.Send(new UpdateDigimonSizeCommand(client.Partner.Id,client.Partner.Size));
-            await _sender.Send(new UpdateDigimonGradeCommand(client.Tamer.Partner.Id,client.Tamer.Partner.HatchGrade));
+            await _sender.Send(new UpdateDigimonSizeCommand(client.Partner.Id, client.Partner.Size));
+            await _sender.Send(new UpdateDigimonGradeCommand(client.Tamer.Partner.Id, client.Tamer.Partner.HatchGrade));
 
-            _mapServer.BroadcastGlobal(new NeonMessagePacket(NeonMessageTypeEnum.Scale,client.Tamer.Name,
-                                       client.Partner.BaseType,client.Partner.Size).Serialize());
+            _mapServer.BroadcastGlobal(new NeonMessagePacket(NeonMessageTypeEnum.Scale, client.Tamer.Name,
+                                       client.Partner.BaseType, client.Partner.Size).Serialize());
 
-            _dungeonServer.BroadcastGlobal(new NeonMessagePacket(NeonMessageTypeEnum.Scale,client.Tamer.Name,
-                                           client.Partner.BaseType,client.Partner.Size).Serialize());
+            _dungeonServer.BroadcastGlobal(new NeonMessagePacket(NeonMessageTypeEnum.Scale, client.Tamer.Name,
+                                           client.Partner.BaseType, client.Partner.Size).Serialize());
 
-            _mapServer.BroadcastForTamerViewsAndSelf(client.TamerId,new UpdateSizePacket(client.Partner.GeneralHandler,client.Partner.Size).Serialize());
+            _mapServer.BroadcastForTamerViewsAndSelf(client.TamerId, new UpdateSizePacket(client.Partner.GeneralHandler, client.Partner.Size).Serialize());
 
-            _dungeonServer.BroadcastForTamerViewsAndSelf(client.TamerId,new UpdateSizePacket(client.Partner.GeneralHandler,client.Partner.Size).Serialize());
+            _dungeonServer.BroadcastForTamerViewsAndSelf(client.TamerId, new UpdateSizePacket(client.Partner.GeneralHandler, client.Partner.Size).Serialize());
 
             client.Send(UtilitiesFunctions.GroupPackets(
-                                new ItemConsumeSuccessPacket(client.Tamer.GeneralHandler,itemSlot).Serialize(),
+                                new ItemConsumeSuccessPacket(client.Tamer.GeneralHandler, itemSlot).Serialize(),
                                 new UpdateStatusPacket(client.Tamer).Serialize(),
-                                new LoadInventoryPacket(client.Tamer.Inventory,InventoryTypeEnum.Inventory).Serialize()
+                                new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize()
                             )
                         );
 
-            client.Send(new DigimonTranscendenceSuccessPacket(0,0,client.Tamer.Partner.HatchGrade,0,(int)client.Tamer.Inventory.Bits,0));
+            client.Send(new DigimonTranscendenceSuccessPacket(0, 0, client.Tamer.Partner.HatchGrade, 0, (int)client.Tamer.Inventory.Bits, 0));
         }
 
-        private Task HandleFailure(GameClient client,short itemSlot,ItemModel targetItem)
+        private Task HandleFailure(GameClient client, short itemSlot, ItemModel targetItem)
         {
             client.Send(
                 UtilitiesFunctions.GroupPackets(
-                    new ItemConsumeFailPacket(itemSlot,targetItem.ItemInfo.Type).Serialize(),
-                    new LoadInventoryPacket(client.Tamer.Inventory,InventoryTypeEnum.Inventory).Serialize()
+                    new ItemConsumeFailPacket(itemSlot, targetItem.ItemInfo.Type).Serialize(),
+                    new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize()
                 )
             );
             return Task.CompletedTask;
@@ -920,7 +920,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     {
                         var diff = UtilitiesFunctions.CalculateDistance(mob.Location.X, client.Tamer.Location.X, mob.Location.Y, client.Tamer.Location.Y);
 
-                        if (diff > 5000)
+                        if (diff > 500000)
                         {
                             client.Send(new ItemConsumeFailPacket(itemSlot, targetItem.ItemInfo.Type, ItemConsumeFailEnum.InvalidArea));
                             break;
@@ -965,8 +965,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                         if (mob?.Location?.X != 0 && mob?.Location?.Y != 0)
                         {
-                            bossX = mob.Location.X;
-                            bossY = mob.Location.Y;
+                           // bossX = mob.Location.X;
+                           // bossY = mob.Location.Y;
 
                             mob.SetLocation(client.Tamer.Location.MapId, bossX, bossY);
                         }
@@ -1150,7 +1150,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             {
                 var starterPartners = new List<int>() { 31001, 31002, 31003, 31004 };
 
-                if (client.Partner.BaseType.IsBetween(  starterPartners.ToArray()))
+                if (client.Partner.BaseType.IsBetween(starterPartners.ToArray()))
                 {
                     client.Send(new ItemConsumeFailPacket(itemSlot, targetItem.ItemInfo.Type).Serialize());
                     client.SendToAll(new NoticeMessagePacket($"Tamer: {client.Tamer.Name} tried to change starter digimon size using a cheat method, Then they got banned!").Serialize());
@@ -1349,7 +1349,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             }
         }
 
-        private async Task Transcend(GameClient client,short itemSlot,ItemModel targetItem)
+        private async Task Transcend(GameClient client, short itemSlot, ItemModel targetItem)
         {
             var evolutionType = _assets.DigimonBaseInfo
                 .First(x => x.Type == client.Tamer.Partner.CurrentType)
@@ -1361,19 +1361,19 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             {
                 Console.WriteLine("Bypassing requirements due to Spirit Evolution!");
 
-                await PerformTranscend(client,itemSlot,targetItem);
+                await PerformTranscend(client, itemSlot, targetItem);
                 return;
             }
 
             if (digimonGrade < DigimonHatchGradeEnum.Perfect || digimonSize < 12500)
             {
-                client.Send(new SystemMessagePacket($"Digimon Level or Size not enough to transcend!",""));
-                client.Send(new SystemMessagePacket($"Grade Required: 5\nSize Required: 125%",""));
+                client.Send(new SystemMessagePacket($"Digimon Level or Size not enough to transcend!", ""));
+                client.Send(new SystemMessagePacket($"Grade Required: 5\nSize Required: 125%", ""));
 
                 client.Send(
                     UtilitiesFunctions.GroupPackets(
-                        new ItemConsumeFailPacket(itemSlot,targetItem.ItemInfo.Type).Serialize(),
-                        new LoadInventoryPacket(client.Tamer.Inventory,InventoryTypeEnum.Inventory).Serialize()
+                        new ItemConsumeFailPacket(itemSlot, targetItem.ItemInfo.Type).Serialize(),
+                        new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize()
                     )
                 );
                 return;
@@ -1381,43 +1381,43 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
             if (digimonGrade == DigimonHatchGradeEnum.Transcend || digimonGrade > DigimonHatchGradeEnum.Transcend)
             {
-                client.Send(new SystemMessagePacket($"Your Digimon is already transcended",""));
+                client.Send(new SystemMessagePacket($"Your Digimon is already transcended", ""));
 
                 client.Send(
                     UtilitiesFunctions.GroupPackets(
-                        new ItemConsumeFailPacket(itemSlot,targetItem.ItemInfo.Type).Serialize(),
-                        new LoadInventoryPacket(client.Tamer.Inventory,InventoryTypeEnum.Inventory).Serialize()
+                        new ItemConsumeFailPacket(itemSlot, targetItem.ItemInfo.Type).Serialize(),
+                        new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize()
                     )
                 );
                 return;
             }
 
             // Perform Transcend
-            await PerformTranscend(client,itemSlot,targetItem);
+            await PerformTranscend(client, itemSlot, targetItem);
         }
-        private async Task PerformTranscend(GameClient client,short itemSlot,ItemModel targetItem)
+        private async Task PerformTranscend(GameClient client, short itemSlot, ItemModel targetItem)
         {
             Random random = new Random();
-            int randomSize = random.Next(12500,13901);
+            int randomSize = random.Next(12500, 13901);
 
             client.Partner.Transcend();
             client.Partner.SetSize((short)randomSize);
 
             client.Partner.SetBaseStatus(
-                _statusManager.GetDigimonBaseStatus(client.Partner.CurrentType,client.Partner.Level,client.Partner.Size)
+                _statusManager.GetDigimonBaseStatus(client.Partner.CurrentType, client.Partner.Level, client.Partner.Size)
             );
 
-            client.Tamer.Inventory.RemoveOrReduceItem(targetItem,1);
+            client.Tamer.Inventory.RemoveOrReduceItem(targetItem, 1);
 
             await _sender.Send(new UpdateItemCommand(targetItem));
-            await _sender.Send(new UpdateDigimonSizeCommand(client.Partner.Id,client.Partner.Size));
-            await _sender.Send(new UpdateDigimonGradeCommand(client.Partner.Id,client.Partner.HatchGrade));
+            await _sender.Send(new UpdateDigimonSizeCommand(client.Partner.Id, client.Partner.Size));
+            await _sender.Send(new UpdateDigimonGradeCommand(client.Partner.Id, client.Partner.HatchGrade));
 
             client.Send(
                 UtilitiesFunctions.GroupPackets(
-                    new ItemConsumeSuccessPacket(client.Tamer.GeneralHandler,itemSlot).Serialize(),
+                    new ItemConsumeSuccessPacket(client.Tamer.GeneralHandler, itemSlot).Serialize(),
                     new UpdateStatusPacket(client.Tamer).Serialize(),
-                    new LoadInventoryPacket(client.Tamer.Inventory,InventoryTypeEnum.Inventory).Serialize()
+                    new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize()
                 )
             );
 
@@ -1431,14 +1431,14 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             );
 
             client.Tamer.UpdateState(CharacterStateEnum.Loading);
-            await _sender.Send(new UpdateCharacterStateCommand(client.TamerId,CharacterStateEnum.Loading));
+            await _sender.Send(new UpdateCharacterStateCommand(client.TamerId, CharacterStateEnum.Loading));
 
             _mapServer.RemoveClient(client);
             client.SetGameQuit(false);
 
             client.Send(new MapSwapPacket(
-                _configuration[GamerServerPublic],_configuration[GameServerPort],
-                client.Tamer.Location.MapId,client.Tamer.Location.X,client.Tamer.Location.Y
+                _configuration[GamerServerPublic], _configuration[GameServerPort],
+                client.Tamer.Location.MapId, client.Tamer.Location.X, client.Tamer.Location.Y
             ));
         }
 
@@ -2275,10 +2275,12 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             if (containerItem == null || containerItem.ItemId == 0 || containerItem.ItemInfo == null)
             {
                 client.Send(UtilitiesFunctions.GroupPackets(
-                    new ItemConsumeFailPacket(itemSlot, targetItem.ItemInfo?.Type ?? 0).Serialize(),
+                    new ItemConsumeFailPacket(itemSlot, targetItem?.ItemInfo?.Type ?? 0).Serialize(),
                     new SystemMessagePacket($"Invalid item on slot {itemSlot} for tamer {client.TamerId}").Serialize()
                 ));
                 _logger.Warning($"Invalid item on slot {itemSlot} for tamer {client.TamerId}.");
+                client.Send(new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory));
+
                 return;
             }
 
@@ -2286,20 +2288,24 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             if (containerAsset == null)
             {
                 client.Send(UtilitiesFunctions.GroupPackets(
-                    new ItemConsumeFailPacket(itemSlot, targetItem.ItemInfo?.Type ?? 0).Serialize(),
+                    new ItemConsumeFailPacket(itemSlot, targetItem?.ItemInfo?.Type ?? 0).Serialize(),
                     new SystemMessagePacket($"No container configuration for item id {containerItem.ItemId}.").Serialize()
                 ));
                 _logger.Warning($"No container configuration for item id {containerItem.ItemId}");
+                client.Send(new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory));
+
                 return;
             }
 
             if (!containerAsset.Rewards.Any())
             {
                 client.Send(UtilitiesFunctions.GroupPackets(
-                    new ItemConsumeFailPacket(itemSlot, targetItem.ItemInfo?.Type ?? 0).Serialize(),
+                    new ItemConsumeFailPacket(itemSlot, targetItem?.ItemInfo?.Type ?? 0).Serialize(),
                     new SystemMessagePacket($"Container config for item {containerAsset.ItemId} has incorrect rewards configuration.").Serialize()
                 ));
                 _logger.Warning($"Container config for item {containerAsset.ItemId} has incorrect rewards configuration.");
+                client.Send(new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory));
+
                 return;
             }
 
@@ -2327,7 +2333,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                         client.Send(new SystemMessagePacket($"Invalid item info for item {possibleReward.ItemId}."));
                         _logger.Warning($"Invalid item info for item {possibleReward.ItemId} in tamer {client.TamerId} scan.");
                         error = true;
-                        return;
+                        break;
                     }
 
                     contentItem.SetItemId(possibleReward.ItemId);
@@ -2347,14 +2353,15 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
             if (error)
             {
-                client.Send(new ItemConsumeFailPacket(itemSlot, targetItem.ItemInfo?.Type ?? 0).Serialize());
+                client.Send(new ItemConsumeFailPacket(itemSlot, targetItem?.ItemInfo?.Type ?? 0).Serialize());
+                client.Send(new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory));
+
                 return;
             }
 
             var receiveList = string.Join(',', receivedItems.Select(x => $"{x.ItemId} x{x.Amount}"));
             _logger.Verbose($"Character {client.TamerId} opened box {containerItem.ItemId} and obtained {receiveList}");
 
-            // Verifica se há espaço suficiente no inventário
             var inventory = client.Tamer.Inventory;
             var availableSlots = inventory.Size - inventory.Items.Count(i => i.ItemId != 0);
             var requiredSlots = 0;
@@ -2374,13 +2381,19 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             if (availableSlots < requiredSlots)
             {
                 client.Send(new SystemMessagePacket("Not enough space in inventory to open the box."));
-                client.Send(new ItemConsumeFailPacket(itemSlot, targetItem.ItemInfo?.Type ?? 0).Serialize());
+                client.Send(new ItemConsumeFailPacket(itemSlot, targetItem?.ItemInfo?.Type ?? 0).Serialize());
+                client.Send(new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory));
+
                 return;
             }
 
+            // 🔹 Corrigido: ordem dos pacotes e await
             client.Tamer.Inventory.RemoveOrReduceItem(containerItem, 1, itemSlot);
             await _sender.Send(new UpdateItemCommand(containerItem));
             client.Send(new ItemConsumeSuccessPacket(client.Tamer.GeneralHandler, itemSlot).Serialize());
+
+            // 🔹 Acumular tasks e enviar depois
+            var updateTasks = new List<Task>();
 
             foreach (var item in receivedItems)
             {
@@ -2394,7 +2407,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     var tempItem = (ItemModel)item.Clone();
                     tempItem.SetSlot(existingItem.Slot);
                     client.Send(new ReceiveItemPacket(tempItem, InventoryTypeEnum.Inventory, existingItem.Slot));
-                    await _sender.Send(new UpdateItemCommand(existingItem));
+                    updateTasks.Add(_sender.Send(new UpdateItemCommand(existingItem)));
                 }
                 else
                 {
@@ -2403,7 +2416,15 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     {
                         item.SetSlot(slot);
                         client.Send(new ReceiveItemPacket(item, InventoryTypeEnum.Inventory, slot));
-                        await _sender.Send(new UpdateItemCommand(item));
+                        updateTasks.Add(_sender.Send(new UpdateItemCommand(item)));
+                    }
+                    else
+                    {
+                        _logger.Warning($"Failed to insert item {item.ItemId} for tamer {client.TamerId}.");
+                        client.Send(new SystemMessagePacket("Inventory sync error. Please relog."));
+                        client.Send(new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory));
+
+                        return;
                     }
 
                     if (containerAsset.Rewards.FirstOrDefault(x => x.ItemId == item.ItemId)?.Rare == true)
@@ -2413,7 +2434,9 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 }
             }
 
-            // Buff especial para a box 70102
+            await Task.WhenAll(updateTasks);
+
+            // 🔹 Buff especial para a box 70102 / 70050
             if (ItemId == 70102 || ItemId == 70050)
             {
                 var buffData = new List<(int BuffId, int Value1, int Value2)>

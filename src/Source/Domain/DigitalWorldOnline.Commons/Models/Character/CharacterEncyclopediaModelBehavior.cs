@@ -58,19 +58,4 @@
         /// </summary>
         public void SetRewardReceived(bool value = true) => IsRewardReceived = value;
     }
-    public sealed partial class CharacterEncyclopediaModel
-    {
-        // Permite atualizar o Level
-        public void SetLevel(short newLevel)
-        {
-            if (newLevel > Level)
-                Level = newLevel;
-        }
-        // Permite atualizar o Size (se quiseres controlar também o tamanho)
-        public void UpdateSize(short newSize)
-        {
-            if (newSize > Size)
-                Size = newSize;
-        }
-    }
 }

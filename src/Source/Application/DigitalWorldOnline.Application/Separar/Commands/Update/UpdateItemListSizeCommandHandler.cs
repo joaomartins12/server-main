@@ -1,7 +1,5 @@
 ﻿using DigitalWorldOnline.Commons.Interfaces;
 using MediatR;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace DigitalWorldOnline.Application.Separar.Commands.Update
 {
@@ -16,11 +14,7 @@ namespace DigitalWorldOnline.Application.Separar.Commands.Update
 
         public async Task<Unit> Handle(UpdateItemListSizeCommand request, CancellationToken cancellationToken)
         {
-            await _repository.UpdateItemListSizeAsync(
-                request.ItemListId,
-                request.NewSize,
-                cancellationToken
-            );
+            await _repository.UpdateItemListSizeAsync(request.ItemListId, request.NewSize);
 
             return Unit.Value;
         }

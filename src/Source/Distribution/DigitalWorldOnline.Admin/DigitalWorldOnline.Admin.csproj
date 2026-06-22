@@ -41,6 +41,12 @@
 	</ItemGroup>
 	
 	<ItemGroup>
+	  <None Include="wwwroot\Images\dmo_header.png">
+	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+	  </None>
+	</ItemGroup>
+	
+	<ItemGroup>
 	  <OpenApiReference Include="appsettings.Development.json" CodeGenerator="NSwagCSharp" />
 	</ItemGroup>
 	
@@ -50,6 +56,9 @@
 	
 	<ItemGroup>
 	  <Content Update="wwwroot\Images\dmo_login_v1.jpg">
+	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+	  </Content>
+	  <Content Update="wwwroot\Images\dmo_login_v2.png">
 	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
 	  </Content>
 	</ItemGroup>
@@ -83,6 +92,6 @@
 	  <_ContentIncludedByDefault Remove="Pages\Events\Maps\SpawnPoints\SpawnPointUpdate.razor" />
 	</ItemGroup>
 	
-	<ProjectExtensions><VisualStudio><UserProperties appsettings_1json__JsonSchema="" wwwroot_4css_4bootstrap_4bootstrap_1min_1css_1map__JsonSchema="" /></VisualStudio></ProjectExtensions>
+	<ProjectExtensions><VisualStudio><UserProperties appsettings_1json__JsonSchema="" /></VisualStudio></ProjectExtensions>
 	
 </Project>

@@ -13,7 +13,6 @@ using DigitalWorldOnline.Commons.Models.Character;
 using DigitalWorldOnline.Commons.Models.Digimon;
 using DigitalWorldOnline.Commons.Packets.Chat;
 using DigitalWorldOnline.Commons.Packets.GameServer;
-using DigitalWorldOnline.Commons.Utils;
 using DigitalWorldOnline.Game.Managers;
 using DigitalWorldOnline.GameHost;
 using DigitalWorldOnline.GameHost.EventsServer;
@@ -36,16 +35,9 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         private readonly ISender _sender;
         private readonly IMapper _mapper;
 
-        public HatchFinishPacketProcessor(
-            StatusManager statusManager,
-            AssetsLoader assets,
-            MapServer mapServer,
-            DungeonsServer dungeonsServer,
-            EventServer eventServer,
-            PvpServer pvpServer,
-            ILogger logger,
-            ISender sender,
-            IMapper mapper)
+        public HatchFinishPacketProcessor(StatusManager statusManager, AssetsLoader assets,
+            MapServer mapServer, DungeonsServer dungeonsServer, EventServer eventServer, PvpServer pvpServer,
+            ILogger logger, ISender sender, IMapper mapper)
         {
             _statusManager = statusManager;
             _assets = assets;
@@ -77,36 +69,12 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             byte digimonSlot = (byte)Enumerable.Range(0, client.Tamer.DigimonSlots)
                 .FirstOrDefault(slot => client.Tamer.Digimons.All(x => x.Slot != slot));
 
-            // ---------- Size por hatch level (centésimos) ----------
-            // 3/5 → 7500–10000 | 4/5 → 10000–11700 | 5/5 → 11800–13000
-            int hatchLevel = client.Tamer.Incubator.HatchLevel; // 1..5
-
-            static short RandomInclusiveShort(int min, int max)
-            {
-                // UtilitiesFunctions.RandomDouble() retorna [0,100); normalizamos para [0,1).
-                double d = UtilitiesFunctions.RandomDouble();
-                double r01 = d > 1.0 ? d / 100.0 : d;        // se já for [0,1), mantém
-                if (r01 >= 1.0) r01 = 0.9999999;            // evita cair em max+1 após Floor
-                int val = min + (int)Math.Floor(r01 * (max - min + 1));
-                if (val < min) val = min;
-                if (val > max) val = max;
-                return (short)val;
-            }
-
-            short size = hatchLevel switch
-            {
-                3 => RandomInclusiveShort(7500, 10000),   // 75,00% – 100,00%
-                4 => RandomInclusiveShort(10000, 11700),  // 100,00% – 117,00%
-                5 => RandomInclusiveShort(11800, 13000),  // 118,00% – 130,00%
-                _ => client.Tamer.Incubator.GetLevelSize() // 1/5 e 2/5: comportamento original
-            };
-
             var newDigimon = DigimonModel.Create(
                 digiName,
                 hatchInfo.HatchType,
                 hatchInfo.HatchType,
-                (DigimonHatchGradeEnum)hatchLevel,
-                size,
+                (DigimonHatchGradeEnum)client.Tamer.Incubator.HatchLevel,
+                client.Tamer.Incubator.GetLevelSize(),
                 digimonSlot
             );
 
@@ -193,7 +161,26 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                 var encyclopediaAdded = await _sender.Send(new CreateCharacterEncyclopediaCommand(encyclopedia));
                 client.Tamer.Encyclopedia.Add(encyclopediaAdded);
+
+                //  _logger.Debug($"Added new encyclopedia entry for {newDigimon.BaseType}.");
             }
+            else
+            {
+                //  _logger.Debug($"Encyclopedia entry already exists for {newDigimon.BaseType}.");
+            }
+
+            // Log Discord
+            await _mapServer.CallDiscord(
+                $"**Hatch Finalizado!**\n" +
+                $"**Tamer**: {client.Tamer.Name} chocou um novo Digimon!\n" +
+                $"**Nome**: {newDigimon.Name}\n" +
+                $"**Tipo**: {newDigimon.BaseType}\n" +
+                $"**Nível de Hatch**: {newDigimon.HatchGrade}",
+                client,
+                "3498db",
+                "DIGIMON HATCH",
+                "1374551411429478400"
+            );
         }
     }
 }

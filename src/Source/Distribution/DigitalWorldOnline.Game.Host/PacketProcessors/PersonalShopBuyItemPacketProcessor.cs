@@ -155,7 +155,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 PersonalShop.Tamer.TamerShop.RemoveOrReduceItems(((ItemModel)newItem.Clone()).GetList(), true);
 
                 _logger.Debug($"Updating {PersonalShop.Tamer.Name} personal shop items...");
-                await _sender.Send(new UpdateItemsCommand(PersonalShop.Tamer.TamerShop));
+                await _sender.Send(new UpdateItemsCommand(PersonalShop.Tamer.TamerShop, true));
 
                 PersonalShop.Tamer.TamerShop.CheckEmptyItems();
 
@@ -164,7 +164,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                 _logger.Debug($"Updating item list...");
 
-                await _sender.Send(new UpdateItemsCommand(client.Tamer.Inventory));
+                await _sender.Send(new UpdateItemsCommand(client.Tamer.Inventory, true));
 
                 _logger.Debug($"Sending consigned shop item list view packet...");
                 

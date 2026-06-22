@@ -262,7 +262,7 @@ namespace DigitalWorldOnline.GameHost
                         if (mob.Class == 8)
                         {
                             mob.UpdateDeathAndResurrectionTime();
-                            SaveMobToDatabase(mob);
+                            SaveMobToDatabaseAsync(mob);
                         }
 
                         if (mob.RespawnInterval > 3599)
@@ -294,7 +294,7 @@ namespace DigitalWorldOnline.GameHost
                             if (mob.Class == 8)
                             {
                                 mob.SetDeathAndResurrectionTime(null, null);
-                                SaveMobToDatabase(mob);
+                                SaveMobToDatabaseAsync(mob);
                             }
                         }
                         else
@@ -1184,7 +1184,7 @@ namespace DigitalWorldOnline.GameHost
             var bitsReward = mob.DropReward.BitsDrop;
             double vipMultiplier = targetClient.AccessLevel switch
             {
-                Commons.Enums.Account.AccountAccessLevelEnum.Vip => 1.0,
+                Commons.Enums.Account.AccountAccessLevelEnum.Vip => 1.1,
                 Commons.Enums.Account.AccountAccessLevelEnum.Vip2 => 1.2,
                 Commons.Enums.Account.AccountAccessLevelEnum.Vip3 => 1.3,
                 Commons.Enums.Account.AccountAccessLevelEnum.Vip4 => 1.4,
@@ -2370,10 +2370,10 @@ namespace DigitalWorldOnline.GameHost
             int vipMultiplier = targetClient.AccessLevel switch
             {
                 Commons.Enums.Account.AccountAccessLevelEnum.Vip => 1,
-                Commons.Enums.Account.AccountAccessLevelEnum.Vip2 => 3,
-                Commons.Enums.Account.AccountAccessLevelEnum.Vip3 => 4,
-                Commons.Enums.Account.AccountAccessLevelEnum.Vip4 => 5,
-                Commons.Enums.Account.AccountAccessLevelEnum.Vip5 => 6,
+                Commons.Enums.Account.AccountAccessLevelEnum.Vip2 => 1,
+                Commons.Enums.Account.AccountAccessLevelEnum.Vip3 => 2,
+                Commons.Enums.Account.AccountAccessLevelEnum.Vip4 => 2,
+                Commons.Enums.Account.AccountAccessLevelEnum.Vip5 => 3,
                 Commons.Enums.Account.AccountAccessLevelEnum.Administrator => 10,
                 _ => 1
             };

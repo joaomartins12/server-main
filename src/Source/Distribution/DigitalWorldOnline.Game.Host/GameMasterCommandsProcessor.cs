@@ -5292,6 +5292,61 @@ namespace DigitalWorldOnline.Game
 
                 #endregion
 
+                case "battle":
+                    {
+                        try
+                        {
+                            client.Send(new SystemMessagePacket("Attempting to remove combat state...").Serialize());
+
+                            // Stop combat locally
+                            client.Tamer.StopBattle(true);
+                            client.Tamer.StopIBattle();
+
+                            // Re-send SetCombatOffPacket several times to ensure client sync
+                            _ = Task.Run(async () =>
+                            {
+                                const int maxAttempts = 5;
+                                const int delayMs = 200; // 0.2s between attempts
+
+                                for (int i = 1; i <= maxAttempts; i++)
+                                {
+                                    try
+                                    {
+                                        client.Send(new SetCombatOffPacket(client.Partner.GeneralHandler).Serialize());
+                                        _logger.Debug($"[Unstuck] Sent SetCombatOff attempt {i}/{maxAttempts} for CharacterId={client.Tamer.Id}");
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.Warning($"[Unstuck] Error sending SetCombatOff attempt {i}: {ex.Message}");
+                                    }
+
+                                    await Task.Delay(delayMs);
+
+                                    if (!client.Tamer.InBattle)
+                                    {
+                                        _logger.Debug($"[Unstuck] CombatOff confirmed after {i} attempts for CharacterId={client.Tamer.Id}");
+                                        break;
+                                    }
+                                }
+
+                                // Force combat off if still stuck after all attempts
+                                if (client.Tamer.InBattle)
+                                {
+                                    client.Tamer.StopIBattle();
+                                    _logger.Warning($"[Unstuck] Forced CombatOff after all attempts for CharacterId={client.Tamer.Id}");
+                                }
+                            });
+
+                            client.Send(new SystemMessagePacket("Combat state cleared successfully.").Serialize());
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.Error($"[Unstuck] Exception while executing command for CharacterId={client?.Tamer?.Id}: {ex.Message}");
+                            client.Send(new SystemMessagePacket("An error occurred while trying to clear combat state.").Serialize());
+                        }
+                    }
+                    break;
+
                 // -----------------------------------------------
 
                 default:

@@ -65,11 +65,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             // Se não houver alvo ou partner
             if (targetMob == null || client.Partner == null)
             {
-                if (!broadcastMobs(client.Tamer.Location.MapId, client.TamerId))
-                {
-                    client.Tamer.StopBattle(true);
-                    broadcastAction(client.TamerId, new SetCombatOffPacket(attackerHandler).Serialize());
-                }
+                await TryStopCombatAsync(client, broadcastAction);
                 return;
             }
 
@@ -77,12 +73,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
             if (!targetMob.Alive)
             {
-                // Alvo já morto
-                if (!broadcastMobs(client.Tamer.Location.MapId, client.TamerId))
-                {
-                    client.Tamer.StopBattle(true);
-                    broadcastAction(client.TamerId, new SetCombatOffPacket(attackerHandler).Serialize());
-                }
+                await TryStopCombatAsync(client, broadcastAction);
                 return;
             }
 
@@ -93,7 +84,6 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 {
                     client.Tamer.SetHidden(false);
                     client.Tamer.UpdateTarget(targetMob);
-                    client.Partner.StartAutoAttack();
                 }
                 return;
             }
@@ -120,52 +110,120 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             }
             else targetMob.AddTarget(client.Tamer);
 
-            client.Tamer.Partner.StartAutoAttack();
+            // Dano
+            var critBonusMultiplier = 0.00;
+            var blocked = false;
+            var finalDmg = client.Tamer.GodMode
+                ? targetMob.CurrentHP
+                : AttackManager.CalculateDamage(client, out critBonusMultiplier, out blocked);
 
-            // Acerto ou miss
-            if (!client.Tamer.GodMode && client.Tamer.CanMissHit())
+            if (finalDmg <= 0) finalDmg = 1;
+            if (finalDmg > targetMob.CurrentHP) finalDmg = targetMob.CurrentHP;
+
+            var newHp = targetMob.ReceiveDamage(finalDmg, client.TamerId);
+            var hitType = blocked ? 2 : critBonusMultiplier > 0 ? 1 : 0;
+
+            if (newHp > 0)
             {
-                broadcastAction(client.TamerId, new MissHitPacket(attackerHandler, targetHandler).Serialize());
+                broadcastAction(client.TamerId,
+                    new HitPacket(attackerHandler, targetHandler, finalDmg, targetMob.HPValue, newHp, hitType).Serialize());
             }
             else
             {
-                // Dano
-                var critBonusMultiplier = 0.00;
-                var blocked = false;
+                client.Partner.SetEndAttacking();
+                broadcastAction(client.TamerId,
+                    new KillOnHitPacket(attackerHandler, targetHandler, finalDmg, hitType).Serialize());
 
-                var finalDmg = client.Tamer.GodMode
-                    ? targetMob.CurrentHP
-                    : AttackManager.CalculateDamage(client, out critBonusMultiplier, out blocked);
-
-                if (finalDmg <= 0) finalDmg = 1;
-                if (finalDmg > targetMob.CurrentHP) finalDmg = targetMob.CurrentHP;
-
-                var newHp = targetMob.ReceiveDamage(finalDmg, client.TamerId);
-                var hitType = blocked ? 2 : critBonusMultiplier > 0 ? 1 : 0;
-
-                if (newHp > 0)
-                {
-                    broadcastAction(client.TamerId,
-                        new HitPacket(attackerHandler, targetHandler, finalDmg, targetMob.HPValue, newHp, hitType).Serialize());
-                }
-                else
-                {
-                    client.Partner.SetEndAttacking();
-                    broadcastAction(client.TamerId,
-                        new KillOnHitPacket(attackerHandler, targetHandler, finalDmg, hitType).Serialize());
-
-                    targetMob.Die();
-
-                    if (!broadcastMobs(client.Tamer.Location.MapId, client.TamerId))
-                    {
-                        client.Tamer.StopBattle(true);
-                        broadcastAction(client.TamerId, new SetCombatOffPacket(attackerHandler).Serialize());
-                    }
-                }
+                targetMob.Die();
             }
+
+            // ✅ Nova verificação contínua do combate
+            _ = Task.Run(async () =>
+            {
+                int checkCount = 0;
+                while (client.Tamer.InBattle && checkCount < 20)
+                {
+                    checkCount++;
+                    try
+                    {
+                        bool anyAlive = false;
+
+                        // Verifica se ainda há mobs vivos realmente
+                        if (client.Tamer.TargetIMobs != null && client.Tamer.TargetIMobs.Count > 0)
+                        {
+                            anyAlive = client.Tamer.TargetIMobs.Any(m => m != null && m.Alive && m.CurrentHP > 0);
+                        }
+
+                        if (!anyAlive)
+                        {
+                            client.Tamer.StopIBattle();
+
+                            // Garante envio do pacote SetCombatOff
+                            for (int i = 1; i <= 5; i++)
+                            {
+                                broadcastAction(client.TamerId, new SetCombatOffPacket(client.Partner.GeneralHandler).Serialize());
+                                await Task.Delay(200);
+                                if (!client.Tamer.InBattle)
+                                    break;
+                            }
+
+                            _logger.Debug($"[PartnerAttack] Combat stopped automatically after mob death for {client.Tamer.Id}");
+                            break;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Warning($"[PartnerAttack] Error in continuous HP check: {ex.Message}");
+                    }
+
+                    await Task.Delay(250);
+                }
+            });
 
             // Próximo hit (AS)
             client.Tamer.Partner.NextHitTime = DateTime.UtcNow.AddMilliseconds(client.Partner.AS);
+        }
+
+        // 🔹 Função auxiliar de encerramento imediato de combate
+        private async Task TryStopCombatAsync(GameClient client, Action<long, byte[]> broadcastAction)
+        {
+            try
+            {
+                if (!client.Tamer.InBattle)
+                    return;
+
+                await Task.Delay(150);
+
+                client.Tamer.StopIBattle();
+
+                _ = Task.Run(async () =>
+                {
+                    const int maxAttempts = 10;
+                    const int delayMs = 200;
+
+                    for (int i = 1; i <= maxAttempts; i++)
+                    {
+                        try
+                        {
+                            broadcastAction(client.TamerId, new SetCombatOffPacket(client.Partner.GeneralHandler).Serialize());
+                        }
+                        catch { }
+
+                        await Task.Delay(delayMs);
+                        if (!client.Tamer.InBattle) break;
+                    }
+
+                    if (client.Tamer.InBattle)
+                    {
+                        client.Tamer.StopIBattle();
+                        _logger.Warning($"[PartnerAttack] Forced CombatOff after retries for CharacterId={client.Tamer.Id}");
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"[PartnerAttack] TryStopCombatAsync error: {ex.Message}");
+            }
         }
     }
 }

@@ -42,7 +42,7 @@ namespace DigitalWorldOnline.Commons.Interfaces
         public int ASValue { get; set; }
         byte CurrentHpRate { get; }
 
-        public bool Alive => CurrentHP > 1;
+        public bool Alive => CurrentHP > 0;
 
 
         // Location Information

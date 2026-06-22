@@ -10,12 +10,12 @@ using DigitalWorldOnline.Commons.Models.Map;
 using DigitalWorldOnline.Commons.Packets.Chat;
 using DigitalWorldOnline.Commons.Packets.GameServer;
 using DigitalWorldOnline.Commons.Packets.MapServer;
+using DigitalWorldOnline.Commons.Utils;
 using DigitalWorldOnline.Game.Managers;
 using DigitalWorldOnline.GameHost;
 using MediatR;
 using Microsoft.Extensions.Configuration;
 using Serilog;
-using System.Linq;
 
 namespace DigitalWorldOnline.Game.PacketProcessors
 {
@@ -23,6 +23,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
     {
         public GameServerPacketEnum Type => GameServerPacketEnum.WarpGateDungeon;
 
+        private const string GameServerAddress = "GameServer:Address";
         private const string GamerServerPublic = "GameServer:PublicAddress";
         private const string GameServerPort = "GameServer:Port";
 
@@ -58,6 +59,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             var portalId = packet.ReadInt();
 
             var portal = _assets.Portal.FirstOrDefault(x => x.Id == portalId);
+            // uso seguro do ?. para evitar NRE caso portal == null
             var portalRequestInfo = _assets.Npcs.FirstOrDefault(x => x.NpcId == portal?.NpcId)?.Portals.ToList();
 
             if (portal == null)
@@ -65,6 +67,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 client.Send(new SystemMessagePacket($"Portal {portalId} not found."));
 
                 var mapId = client.Tamer.Location.MapId;
+
                 var mapConfig = await _sender.Send(new GameMapConfigByMapIdQuery(mapId));
                 var waypoints = await _sender.Send(new MapRegionListAssetsByMapIdQuery(mapId));
 
@@ -85,13 +88,15 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 client.Tamer.UpdateState(CharacterStateEnum.Loading);
                 await _sender.Send(new UpdateCharacterStateCommand(client.TamerId, CharacterStateEnum.Loading));
 
-                client.Send(new MapSwapPacket(
-                    _configuration[GamerServerPublic],
-                    _configuration[GameServerPort],
-                    mapId,
-                    destination.X,
-                    destination.Y
-                ));
+                client.Send(
+                    new MapSwapPacket(
+                        _configuration[GamerServerPublic],
+                        _configuration[GameServerPort],
+                        mapId,
+                        destination.X,
+                        destination.Y
+                    )
+                );
             }
             else
             {
@@ -105,71 +110,121 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                         switch (RemoveInfo.npcPortalsAsset[i].Type)
                         {
                             case NpcResourceTypeEnum.Money:
-                                client.Tamer.Inventory.RemoveBits(RemoveInfo.npcPortalsAsset[i].ItemId);
-                                await _sender.Send(new UpdateItemListBitsCommand(client.Tamer.Inventory));
-                                break;
-
-                            case NpcResourceTypeEnum.Item:
-                                var targeItem = client.Tamer.Inventory.FindItemById(RemoveInfo.npcPortalsAsset[i].ItemId);
-                                if (targeItem != null)
                                 {
-                                    client.Tamer.Inventory.RemoveOrReduceItem(targeItem, 1);
-                                    await _sender.Send(new UpdateItemCommand(targeItem));
+                                    client.Tamer.Inventory.RemoveBits(RemoveInfo.npcPortalsAsset[i].ItemId);
+                                    await _sender.Send(new UpdateItemListBitsCommand(client.Tamer.Inventory));
+                                    break;
                                 }
-                                break;
+                            case NpcResourceTypeEnum.Item:
+                                {
+                                    var targeItem = client.Tamer.Inventory.FindItemById(RemoveInfo.npcPortalsAsset[i].ItemId);
+                                    if (targeItem != null)
+                                    {
+                                        client.Tamer.Inventory.RemoveOrReduceItem(targeItem, 1);
+                                        await _sender.Send(new UpdateItemCommand(targeItem));
+                                    }
+                                    break;
+                                }
                         }
                     }
                 }
 
                 var mapClient = _mapServer.FindClientByTamerId(client.TamerId);
+
                 if (mapClient == null)
                 {
                     var tamerMap = _dungeonServer.Maps.First(x => x.Clients.Exists(y => y.TamerId == client.TamerId));
 
                     if (!portal.IsLocal && tamerMap.IsRoyalBase)
                     {
-                        if ((tamerMap?.RoyalBaseMap?.AllowUsingPortalFromFloorOneToFloorTwo == false ||
-                             tamerMap?.RoyalBaseMap?.AllowUsingPortalFromFloorOneToFloorTwo == null) &&
-                             portal.DestinationMapId == 1702)
-                        {
-                            int LocationX = 32000, LocationY = 32000;
+                        int MapId = tamerMap.MapId;
 
-                            client.Tamer.NewLocation(tamerMap.MapId, LocationX, LocationY);
+                        // Floor 1 -> 2 bloqueado
+                        if ((tamerMap?.RoyalBaseMap?.AllowUsingPortalFromFloorOneToFloorTwo == false
+                             || tamerMap?.RoyalBaseMap?.AllowUsingPortalFromFloorOneToFloorTwo == null)
+                            && portal.DestinationMapId == 1702)
+                        {
+                            int LocationX = 32000;
+                            int LocationY = 32000;
+
+                            client.Tamer.NewLocation(MapId, LocationX, LocationY);
                             await _sender.Send(new UpdateCharacterLocationCommand(client.Tamer.Location));
 
-                            client.Tamer.Partner.NewLocation(tamerMap.MapId, LocationX, LocationY);
+                            client.Tamer.Partner.NewLocation(MapId, LocationX, LocationY);
                             await _sender.Send(new UpdateDigimonLocationCommand(client.Tamer.Partner.Location));
 
                             client.Send(new LocalMapSwapPacket(
                                 client.Tamer.GeneralHandler, client.Tamer.Partner.GeneralHandler,
                                 LocationX, LocationY, LocationX, LocationY));
+
+                            // >>> SINCRONIZAÇÃO DE PARTY (igual ao original) <<<
+                            var partyRB = _partyManager.FindParty(client.TamerId);
+                            if (partyRB != null)
+                            {
+                                partyRB.UpdateMember(partyRB[client.TamerId], client.Tamer);
+
+                                foreach (var target in partyRB.Members.Values)
+                                {
+                                    var targetClient = _mapServer.FindClientByTamerId(target.Id)
+                                                       ?? _dungeonServer.FindClientByTamerId(target.Id);
+                                    if (targetClient == null) continue;
+
+                                    if (target.Id != client.Tamer.Id)
+                                        targetClient.Send(new PartyMemberWarpGatePacket(partyRB[client.TamerId], targetClient.Tamer).Serialize());
+                                }
+
+                                client.Send(new PartyMemberListPacket(partyRB, client.TamerId, (byte)(partyRB.Members.Count - 1)).Serialize());
+                            }
+                            // <<< FIM PARTY SYNC >>>
 
                             return;
                         }
 
-                        if ((tamerMap?.RoyalBaseMap?.AllowUsingPortalFromFloorTwoToFloorThree == false ||
-                             tamerMap?.RoyalBaseMap?.AllowUsingPortalFromFloorTwoToFloorThree == null) &&
-                             portal.DestinationMapId == 1703)
+                        // Floor 2 -> 3 bloqueado
+                        if ((tamerMap?.RoyalBaseMap?.AllowUsingPortalFromFloorTwoToFloorThree == false
+                             || tamerMap?.RoyalBaseMap?.AllowUsingPortalFromFloorTwoToFloorThree == null)
+                            && portal.DestinationMapId == 1703)
                         {
-                            int LocationX = 34814, LocationY = 30686;
+                            int LocationX = 34814;
+                            int LocationY = 30686;
 
-                            client.Tamer.NewLocation(tamerMap.MapId, LocationX, LocationY);
+                            client.Tamer.NewLocation(MapId, LocationX, LocationY);
                             await _sender.Send(new UpdateCharacterLocationCommand(client.Tamer.Location));
 
-                            client.Tamer.Partner.NewLocation(tamerMap.MapId, LocationX, LocationY);
+                            client.Tamer.Partner.NewLocation(MapId, LocationX, LocationY);
                             await _sender.Send(new UpdateDigimonLocationCommand(client.Tamer.Partner.Location));
 
                             client.Send(new LocalMapSwapPacket(
                                 client.Tamer.GeneralHandler, client.Tamer.Partner.GeneralHandler,
                                 LocationX, LocationY, LocationX, LocationY));
+
+                            // >>> SINCRONIZAÇÃO DE PARTY (igual ao original) <<<
+                            var partyRB = _partyManager.FindParty(client.TamerId);
+                            if (partyRB != null)
+                            {
+                                partyRB.UpdateMember(partyRB[client.TamerId], client.Tamer);
+
+                                foreach (var target in partyRB.Members.Values)
+                                {
+                                    var targetClient = _mapServer.FindClientByTamerId(target.Id)
+                                                       ?? _dungeonServer.FindClientByTamerId(target.Id);
+                                    if (targetClient == null) continue;
+
+                                    if (target.Id != client.Tamer.Id)
+                                        targetClient.Send(new PartyMemberWarpGatePacket(partyRB[client.TamerId], targetClient.Tamer).Serialize());
+                                }
+
+                                client.Send(new PartyMemberListPacket(partyRB, client.TamerId, (byte)(partyRB.Members.Count - 1)).Serialize());
+                            }
+                            // <<< FIM PARTY SYNC >>>
 
                             return;
                         }
                     }
                 }
 
-                // 🔹 Warp local (mesmo mapa, sem Loading/MapSwap)
-                if (portal.IsLocal || portal.DestinationMapId == client.Tamer.Location.MapId)
+                // --- WARP LOCAL (mantém teu comportamento: sem Loading) ---
+                if (portal.IsLocal)
                 {
                     client.Tamer.NewLocation(portal.DestinationMapId, portal.DestinationX, portal.DestinationY);
                     await _sender.Send(new UpdateCharacterLocationCommand(client.Tamer.Location));
@@ -177,23 +232,41 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     client.Tamer.Partner.NewLocation(portal.DestinationMapId, portal.DestinationX, portal.DestinationY);
                     await _sender.Send(new UpdateDigimonLocationCommand(client.Tamer.Partner.Location));
 
-                    // Apenas troca de posição dentro do mesmo mapa
                     client.Send(new LocalMapSwapPacket(
-                        client.Tamer.GeneralHandler,
-                        client.Tamer.Partner.GeneralHandler,
-                        portal.DestinationX, portal.DestinationY,
-                        portal.DestinationX, portal.DestinationY
-                    ));
+                        client.Tamer.GeneralHandler, client.Tamer.Partner.GeneralHandler,
+                        portal.DestinationX, portal.DestinationY, portal.DestinationX, portal.DestinationY));
 
-                    // 🔹 Força atualização de visibilidade
-                    var dungeonMap = _dungeonServer.Maps.FirstOrDefault(m => m.MapId == client.Tamer.Location.MapId);
-                    if (dungeonMap != null)
+                    // >>> SINCRONIZAÇÃO DE PARTY (iguais aos não-locais no original) <<<
+                    var partyLocal = _partyManager.FindParty(client.TamerId);
+                    if (partyLocal != null)
                     {
-                        _dungeonServer.ForceUpdateTamers(dungeonMap);
-                    }
+                        partyLocal.UpdateMember(partyLocal[client.TamerId], client.Tamer);
 
-                    // 🔹 Não coloca o tamer em Loading!
+                        foreach (var target in partyLocal.Members.Values)
+                        {
+                            var targetClient = _mapServer.FindClientByTamerId(target.Id)
+                                               ?? _dungeonServer.FindClientByTamerId(target.Id);
+                            if (targetClient == null) continue;
+
+                            if (target.Id != client.Tamer.Id)
+                                targetClient.Send(new PartyMemberWarpGatePacket(partyLocal[client.TamerId], targetClient.Tamer).Serialize());
+                        }
+
+                        client.Send(new PartyMemberListPacket(partyLocal, client.TamerId, (byte)(partyLocal.Members.Count - 1)).Serialize());
+                    }
+                    // <<< FIM PARTY SYNC >>>
+
                     return;
+                }
+
+                // --- WARP NÃO-LOCAL (mantém fluxo original) ---
+                if (client.DungeonMap)
+                {
+                    _dungeonServer.RemoveClient(client);
+                }
+                else
+                {
+                    _mapServer.RemoveClient(client);
                 }
 
                 client.Tamer.NewLocation(portal.DestinationMapId, portal.DestinationX, portal.DestinationY);
@@ -208,12 +281,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 client.SetGameQuit(false);
 
                 client.Send(new MapSwapPacket(
-                    _configuration[GamerServerPublic],
-                    _configuration[GameServerPort],
-                    client.Tamer.Location.MapId,
-                    client.Tamer.Location.X,
-                    client.Tamer.Location.Y
-                ));
+                    _configuration[GamerServerPublic], _configuration[GameServerPort],
+                    client.Tamer.Location.MapId, client.Tamer.Location.X, client.Tamer.Location.Y));
 
                 var party = _partyManager.FindParty(client.TamerId);
                 if (party != null)
@@ -224,16 +293,17 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     {
                         var targetClient = _mapServer.FindClientByTamerId(target.Id)
                                            ?? _dungeonServer.FindClientByTamerId(target.Id);
-
                         if (targetClient == null) continue;
 
-                        if (target.Id != client.TamerId)
+                        if (target.Id != client.Tamer.Id)
                             targetClient.Send(new PartyMemberWarpGatePacket(party[client.TamerId], targetClient.Tamer).Serialize());
                     }
 
                     client.Send(new PartyMemberListPacket(party, client.TamerId, (byte)(party.Members.Count - 1)).Serialize());
                 }
             }
+
+            //client.Send(new SendHandler(client.Tamer.GeneralHandler));
         }
     }
 }

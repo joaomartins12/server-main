@@ -66,8 +66,6 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
         public async Task Process(GameClient client, byte[] packetData)
         {
-            var totalSw = System.Diagnostics.Stopwatch.StartNew();
-
             var packet = new GamePacketReader(packetData);
 
             packet.Skip(4);
@@ -287,6 +285,10 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 }
                 client.Send(new InitialInfoPacket(character, null));
 
+                // ✅ Envia sempre a enciclopédia atualizada ao cliente ao entrar no jogo
+                client.Send(new EncyclopediaLoadPacket(character.Encyclopedia));
+                _logger.Debug($"[EncyclopediaLoad] Packet de enciclopédia enviado automaticamente para {character.Name} ({character.Id})");
+
                 var party = _partyManager.FindParty(client.TamerId);
 
                 if (party != null)
@@ -343,8 +345,6 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 _logger.Error($"Disconnecting Client");
                 client.Disconnect();
             }
-
-            _logger.Information("InitialInformation finished in {ms} ms total.", totalSw.ElapsedMilliseconds);
         }
 
         private async Task ReceiveArenaPoints(GameClient client)
@@ -403,11 +403,19 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         }
         private byte? GetTargetChannel(byte currentChannel, Dictionary<byte, byte> channels)
         {
-            // Se o canal não está definido, força sempre para 0
-            if (currentChannel == byte.MaxValue)
-                return 0;
+            if (currentChannel == byte.MaxValue && !channels.IsNullOrEmpty())
+            {
+                return SelectRandomChannel(channels.Keys);
+            }
 
-            return currentChannel;
+            return currentChannel == byte.MaxValue ? null : (byte?)currentChannel;
+        }
+
+        private byte SelectRandomChannel(IEnumerable<byte> channelKeys)
+        {
+            var random = new Random();
+            var keys = channelKeys.ToList();
+            return keys[random.Next(keys.Count)];
         }
 
         private byte CreateNewChannelForMap(Dictionary<byte, byte> channels)

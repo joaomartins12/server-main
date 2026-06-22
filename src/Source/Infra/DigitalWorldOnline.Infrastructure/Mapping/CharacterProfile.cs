@@ -87,11 +87,11 @@ namespace DigitalWorldOnline.Infrastructure.Mapping
             CreateMap<CharacterEncyclopediaModel, CharacterEncyclopediaDTO>()
                 .ReverseMap();
 
-            // 🔹 Corrigido para evitar loop na propriedade Encyclopedia
             CreateMap<CharacterEncyclopediaEvolutionsModel, CharacterEncyclopediaEvolutionsDTO>()
-                .ForMember(dest => dest.Encyclopedia, opt => opt.Ignore())
-                .ReverseMap()
-                .ForMember(dest => dest.Encyclopedia, opt => opt.Ignore());
+                .ReverseMap();
+
+            CreateMap<CharacterEncyclopediaEvolutionsDTO, CharacterEncyclopediaEvolutionsModel>()
+                .ReverseMap();
         }
     }
 }

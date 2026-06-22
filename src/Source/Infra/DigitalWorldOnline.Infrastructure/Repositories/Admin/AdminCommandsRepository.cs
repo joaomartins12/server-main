@@ -37,14 +37,13 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Admin
             if (!string.IsNullOrEmpty(account.DiscordId))
             {
                 var exists = await _context.Account
-                    .AsNoTracking()
                     .AnyAsync(x => x.DiscordId == account.DiscordId);
 
                 if (exists)
                     throw new InvalidOperationException("Já existe uma conta com este DiscordId.");
             }
 
-            _context.Account.Add(account);
+            await _context.Account.AddAsync(account);
             await _context.SaveChangesAsync();
 
             return account;
@@ -62,13 +61,11 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Admin
             try
             {
                 var entity = await _context.GotchaAsset
-                    .AsSplitQuery()
                     .Include(g => g.Items)
                     .Include(g => g.RareItems)
                     .FirstOrDefaultAsync(g => g.GotchaId == machine.GotchaId);
 
-                if (entity == null)
-                    return false;
+                if (entity == null) return false;
 
                 // Atualiza propriedades básicas
                 entity.NpcId = machine.NpcId;
@@ -78,13 +75,20 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Admin
                 entity.MinLv = machine.MinLv;
                 entity.MaxLv = machine.MaxLv;
                 entity.RareItemCnt = machine.RareItemCnt;
+
+                // Se você alterou o DTO para usar bool:
                 entity.Active = machine.Active;
 
-                // Remove itens existentes antes de adicionar os novos
+                // Se NÃO alterou o DTO e está usando a propriedade intermediária:
+                // entity.Active = machine.Active; // Mantém como está se for int
+                // Ou se estiver usando a propriedade IsActive:
+                // entity.Active = isActive ? 1 : 0;
+
+                // Remove itens existentes
                 _context.RemoveRange(entity.Items);
                 _context.RemoveRange(entity.RareItems);
 
-                // Adiciona novos itens normais
+                // Adiciona novos itens normais com todos os campos
                 entity.Items = machine.Items.Select(i => new GotchaItemsAssetDTO
                 {
                     ItemId = i.ItemId,
@@ -110,21 +114,25 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Admin
             }
             catch (Exception ex)
             {
+                // Log do erro
                 Console.WriteLine($"Error updating GotchaAsset: {ex.Message}");
                 return false;
             }
         }
+
+
         public async Task<ContainerAssetDTO> AddContainerConfigAsync(ContainerAssetDTO container)
         {
             _context.Container.Add(container);
+
             await _context.SaveChangesAsync();
+
             return container;
         }
 
         public async Task<MobConfigDTO> AddMobAsync(MobConfigDTO mob)
         {
             var targetMap = await _context.MapConfig
-                .AsNoTracking()
                 .SingleAsync(x => x.Id == mob.GameMapConfigId);
 
             mob.Location.MapId = (short)targetMap.MapId;
@@ -139,13 +147,12 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Admin
         public async Task<SummonMobDTO> AddSummonMobAsync(SummonMobDTO mob)
         {
             var targetSummon = await _context.SummonsConfig
-                .AsNoTracking()
                 .SingleAsync(x => x.Id == mob.SummonDTOId);
 
-            // Usa o primeiro Map do SummonConfig ou 0 se não existir
+            // Assign the first map from the SummonConfig or default to 0 if none exist
             mob.Location.MapId = (short)targetSummon.Maps.FirstOrDefault();
 
-            // Reset Drop IDs para evitar conflitos
+            // Reset Drop IDs to prevent conflicts
             mob.DropReward?.Drops.ForEach(drop => drop.Id = 0);
 
             _context.SummonsMobConfig.Add(mob);
@@ -154,104 +161,112 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Admin
             return mob;
         }
 
+
+
         public async Task<ScanDetailAssetDTO> AddScanConfigAsync(ScanDetailAssetDTO scan)
         {
             _context.ScanDetail.Add(scan);
+
             await _context.SaveChangesAsync();
+
             return scan;
         }
 
         public async Task<ServerDTO> AddServerAsync(ServerDTO server)
         {
             _context.ServerConfig.Add(server);
+
             await _context.SaveChangesAsync();
+
             return server;
         }
 
         public async Task<MapRegionAssetDTO> AddSpawnPointAsync(MapRegionAssetDTO spawnPoint, int mapId)
         {
             var mapRegionList = await _context.MapRegionListAsset
-                .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.Regions)
                 .SingleOrDefaultAsync(x => x.MapId == mapId);
 
-            if (mapRegionList != null)
-            {
-                spawnPoint.MapRegionListId = mapRegionList.Id;
-                mapRegionList.Regions.Add(spawnPoint);
+            if (mapRegionList == null)
+                return null;
 
-                _context.Update(mapRegionList);
-                _context.MapRegionAsset.Add(spawnPoint);
+            spawnPoint.MapRegionListId = mapRegionList.Id;
 
-                await _context.SaveChangesAsync();
-            }
+            // Adiciona o spawnPoint diretamente
+            await _context.MapRegionAsset.AddAsync(spawnPoint);
+
+            // Também adiciona à lista em memória (caso seja necessário para lógica interna)
+            mapRegionList.Regions.Add(spawnPoint);
+
+            await _context.SaveChangesAsync();
 
             return spawnPoint;
         }
+
         public async Task<UserDTO> AddUserAsync(UserDTO user)
         {
             _context.UserConfig.Add(user);
+
             await _context.SaveChangesAsync();
+
             return user;
         }
 
         public async Task DeleteAccountAsync(long id)
         {
             var dto = await _context.Account
-                .AsNoTracking()
                 .SingleOrDefaultAsync(x => x.Id == id);
 
-            if (dto != null)
-            {
-                _context.RemoveRange(
-                    await _context.Character
-                        .Where(x => x.AccountId == id)
-                        .ToListAsync()
-                );
+            if (dto == null)
+                return;
 
-                _context.Remove(dto);
-                await _context.SaveChangesAsync();
-            }
+            var characters = await _context.Character
+                .Where(x => x.AccountId == id)
+                .ToListAsync();
+
+            if (characters.Count > 0)
+                _context.RemoveRange(characters);
+
+            _context.Remove(dto);
+
+            await _context.SaveChangesAsync();
         }
 
         public async Task DeleteSummonAsync(long id)
         {
             var dto = await _context.SummonsConfig
-                .AsNoTracking()
                 .SingleOrDefaultAsync(x => x.Id == id);
 
-            if (dto != null)
-            {
-                _context.Remove(dto);
-                await _context.SaveChangesAsync();
-            }
+            if (dto == null)
+                return;
+
+            _context.Remove(dto);
+            await _context.SaveChangesAsync();
         }
 
         public async Task DeleteContainerConfigAsync(long id)
         {
             var dto = await _context.Container
-                .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.Rewards)
                 .SingleOrDefaultAsync(x => x.Id == id);
 
-            if (dto != null)
-            {
-                _context.Remove(dto);
-                await _context.SaveChangesAsync();
-            }
+            if (dto == null)
+                return;
+
+            _context.Remove(dto);
+            await _context.SaveChangesAsync();
         }
 
         public async Task DeleteMapMobsAsync(long id)
         {
             var dto = await _context.MapConfig
-                .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.Mobs)
                 .SingleOrDefaultAsync(x => x.Id == id);
 
-            if (dto != null)
+            if (dto == null)
+                return;
+
+            if (dto.Mobs != null && dto.Mobs.Count > 0)
             {
                 _context.RemoveRange(dto.Mobs);
                 await _context.SaveChangesAsync();
@@ -261,132 +276,131 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Admin
         public async Task DeleteMobAsync(long id)
         {
             var dto = await _context.MobConfig
-                .AsNoTracking()
                 .SingleOrDefaultAsync(x => x.Id == id);
 
-            if (dto != null)
-            {
-                _context.Remove(dto);
-                await _context.SaveChangesAsync();
-            }
+            if (dto == null)
+                return;
+
+            _context.Remove(dto);
+            await _context.SaveChangesAsync();
         }
 
         public async Task DeleteSummonMobAsync(long id)
         {
             var dto = await _context.SummonsMobConfig
-                .AsNoTracking()
                 .SingleOrDefaultAsync(x => x.Id == id);
 
-            if (dto != null)
-            {
-                _context.Remove(dto);
-                await _context.SaveChangesAsync();
-            }
+            if (dto == null)
+                return;
+
+            _context.Remove(dto);
+            await _context.SaveChangesAsync();
         }
 
         public async Task DeleteScanConfigAsync(long id)
         {
             var dto = await _context.ScanDetail
-                .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.Rewards)
                 .SingleOrDefaultAsync(x => x.Id == id);
 
-            if (dto != null)
-            {
-                _context.Remove(dto);
-                await _context.SaveChangesAsync();
-            }
+            if (dto == null)
+                return;
+
+            _context.Remove(dto);
+            await _context.SaveChangesAsync();
         }
 
         public async Task DeleteServerAsync(long id)
         {
             var dto = await _context.ServerConfig
-                .AsNoTracking()
                 .SingleOrDefaultAsync(x => x.Id == id);
 
-            if (dto != null)
-            {
-                _context.Remove(dto);
-                await _context.SaveChangesAsync();
-            }
+            if (dto == null)
+                return;
+
+            _context.Remove(dto);
+            await _context.SaveChangesAsync();
         }
 
         public async Task DeleteSpawnPointAsync(long id)
         {
             var dto = await _context.MapRegionAsset
-                .AsNoTracking()
                 .SingleOrDefaultAsync(x => x.Id == id);
 
-            if (dto != null)
-            {
-                _context.Remove(dto);
-                await _context.SaveChangesAsync();
-            }
+            if (dto == null)
+                return;
+
+            _context.Remove(dto);
+            await _context.SaveChangesAsync();
         }
 
         public async Task DeleteUserAsync(long id)
         {
             var dto = await _context.UserConfig
-                .AsNoTracking()
                 .SingleOrDefaultAsync(x => x.Id == id);
 
-            if (dto != null)
-            {
-                _context.Remove(dto);
-                await _context.SaveChangesAsync();
-            }
+            if (dto == null)
+                return;
+
+            _context.Remove(dto);
+            await _context.SaveChangesAsync();
         }
 
         public async Task DuplicateMobAsync(long id)
         {
             var dto = await _context.MobConfig
                 .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.Location)
                 .Include(x => x.ExpReward)
-                .Include(x => x.DropReward).ThenInclude(y => y.Drops)
-                .Include(x => x.DropReward).ThenInclude(y => y.BitsDrop)
+                .Include(x => x.DropReward)
+                    .ThenInclude(y => y.Drops)
+                .Include(x => x.DropReward)
+                    .ThenInclude(y => y.BitsDrop)
                 .SingleOrDefaultAsync(x => x.Id == id);
 
-            if (dto != null)
+            if (dto == null)
+                return;
+
+            // Mantém teu comportamento original
+            var clonedEntity = (MobConfigDTO)dto.Clone();
+            clonedEntity.Id = 0;
+
+            // Corrige tracking de entidades filhas (impede leak de contextos anteriores)
+            if (clonedEntity.Location != null)
+                clonedEntity.Location.Id = 0;
+
+            if (clonedEntity.ExpReward != null)
+                clonedEntity.ExpReward.Id = 0;
+
+            if (clonedEntity.DropReward != null)
             {
-                var clonedEntity = (MobConfigDTO)dto.Clone();
-                clonedEntity.Id = 0;
+                clonedEntity.DropReward.Id = 0;
 
-                if (clonedEntity.Location == null)
-                    clonedEntity.Location = new MobLocationConfigDTO();
-                else
-                    clonedEntity.Location.Id = 0;
-
-                if (clonedEntity.ExpReward == null)
-                    clonedEntity.ExpReward = new MobExpRewardConfigDTO();
-                else
-                    clonedEntity.ExpReward.Id = 0;
-
-                if (clonedEntity.DropReward == null)
-                    clonedEntity.DropReward = new MobDropRewardConfigDTO();
-                else
+                if (clonedEntity.DropReward.Drops != null)
                 {
-                    clonedEntity.DropReward.Id = 0;
-                    clonedEntity.DropReward.Drops.ForEach(drop => drop.Id = 0);
-                    clonedEntity.DropReward.BitsDrop.Id = 0;
+                    foreach (var drop in clonedEntity.DropReward.Drops)
+                        drop.Id = 0;
                 }
 
-                _context.Add(clonedEntity);
-                await _context.SaveChangesAsync();
+                if (clonedEntity.DropReward.BitsDrop != null)
+                    clonedEntity.DropReward.BitsDrop.Id = 0;
             }
+
+            // ✅ Salva com segurança
+            await _context.MobConfig.AddAsync(clonedEntity);
+            await _context.SaveChangesAsync();
         }
 
         public async Task DuplicateSummonMobAsync(long id)
         {
             var dto = await _context.SummonsMobConfig
                 .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.Location)
                 .Include(x => x.ExpReward)
-                .Include(x => x.DropReward).ThenInclude(y => y.Drops)
-                .Include(x => x.DropReward).ThenInclude(y => y.BitsDrop)
+                .Include(x => x.DropReward)
+                .ThenInclude(y => y.Drops)
+                .Include(x => x.DropReward)
+                .ThenInclude(y => y.BitsDrop)
                 .SingleOrDefaultAsync(x => x.Id == id);
 
             if (dto != null)
@@ -405,12 +419,22 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Admin
                     clonedEntity.ExpReward.Id = 0;
 
                 if (clonedEntity.DropReward == null)
+                {
+                    // 🔹 Mantém tua estrutura original intacta — sem criar tipos novos
                     clonedEntity.DropReward = new SummonMobDropRewardDTO();
+                }
                 else
                 {
                     clonedEntity.DropReward.Id = 0;
-                    clonedEntity.DropReward.Drops.ForEach(drop => drop.Id = 0);
-                    clonedEntity.DropReward.BitsDrop.Id = 0;
+
+                    if (clonedEntity.DropReward.Drops != null)
+                    {
+                        foreach (var drop in clonedEntity.DropReward.Drops)
+                            drop.Id = 0;
+                    }
+
+                    if (clonedEntity.DropReward.BitsDrop != null)
+                        clonedEntity.DropReward.BitsDrop.Id = 0;
                 }
 
                 _context.Add(clonedEntity);
@@ -431,7 +455,7 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Admin
                 entity.Silk = account.Silk;
                 entity.AccessLevel = account.AccessLevel;
 
-                // Só atualiza a senha se for fornecida
+                // ✅ Só atualiza a senha se ela for preenchida
                 if (!string.IsNullOrWhiteSpace(account.Password))
                 {
                     entity.Password = account.Password;
@@ -453,8 +477,7 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Admin
         public async Task UpdateScanConfigAsync(ScanDetailAssetDTO scan)
         {
             var dto = await _context.ScanDetail
-                .AsNoTracking()
-                .AsSplitQuery()
+                // ❌ removido AsNoTracking() — causa tracking leak e conflitos
                 .Include(x => x.Rewards)
                 .SingleOrDefaultAsync(x => x.Id == scan.Id);
 
@@ -464,23 +487,25 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Admin
             }
             else
             {
+                // Remove os itens que não existem mais
                 var parameterIds = scan.Rewards.Select(x => x.Id);
-                var removeItems = dto.Rewards.Where(x => !parameterIds.Contains(x.Id));
+                var removeItems = dto.Rewards.Where(x => !parameterIds.Contains(x.Id)).ToList();
                 foreach (var removeItem in removeItems)
                 {
                     _context.Remove(removeItem);
                 }
 
+                // Adiciona os novos itens que não estão na base de dados
                 var databaseIds = dto.Rewards.Select(x => x.Id);
-                var newItems = scan.Rewards.Where(x => !databaseIds.Contains(x.Id));
+                var newItems = scan.Rewards.Where(x => !databaseIds.Contains(x.Id)).ToList();
                 foreach (var newItem in newItems)
                 {
                     newItem.Id = 0;
                     newItem.ScanDetailAssetId = dto.Id;
-
                     _context.Add(newItem);
                 }
 
+                // Atualiza os dados básicos
                 dto.Rewards = scan.Rewards;
                 dto.ItemId = scan.ItemId;
                 dto.ItemName = scan.ItemName;
@@ -496,8 +521,7 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Admin
         public async Task UpdateContainerConfigAsync(ContainerAssetDTO container)
         {
             var dto = await _context.Container
-                .AsNoTracking()
-                .AsSplitQuery()
+                // ❌ Removido AsNoTracking() — causa leak ao tentar atualizar entidades relacionadas
                 .Include(x => x.Rewards)
                 .SingleOrDefaultAsync(x => x.Id == container.Id);
 
@@ -507,23 +531,25 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Admin
             }
             else
             {
+                // Remove recompensas que não existem mais
                 var parameterIds = container.Rewards.Select(x => x.Id);
-                var removeItems = dto.Rewards.Where(x => !parameterIds.Contains(x.Id));
+                var removeItems = dto.Rewards.Where(x => !parameterIds.Contains(x.Id)).ToList();
                 foreach (var removeItem in removeItems)
                 {
                     _context.Remove(removeItem);
                 }
 
+                // Adiciona novas recompensas que não estão no banco
                 var databaseIds = dto.Rewards.Select(x => x.Id);
-                var newItems = container.Rewards.Where(x => !databaseIds.Contains(x.Id));
+                var newItems = container.Rewards.Where(x => !databaseIds.Contains(x.Id)).ToList();
                 foreach (var newItem in newItems)
                 {
                     newItem.Id = 0;
                     newItem.ContainerAssetId = dto.Id;
-
                     _context.Add(newItem);
                 }
 
+                // Atualiza os dados básicos do container
                 dto.Rewards = container.Rewards;
                 dto.ItemId = container.ItemId;
                 dto.ItemName = container.ItemName;
@@ -538,7 +564,7 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Admin
         public async Task UpdateServerAsync(ServerDTO server)
         {
             var dto = await _context.ServerConfig
-                .AsNoTracking()
+                // ❌ Removido AsNoTracking() — EF precisa rastrear para Update seguro
                 .SingleOrDefaultAsync(x => x.Id == server.Id);
 
             if (dto != null)
@@ -558,7 +584,7 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Admin
         public async Task UpdateSpawnPointAsync(MapRegionAssetDTO spawnPoint, long mapId)
         {
             var dto = await _context.MapRegionAsset
-                .AsNoTracking()
+                // ❌ Removido AsNoTracking() — EF precisa rastrear a entidade para atualização limpa
                 .SingleOrDefaultAsync(x => x.Id == spawnPoint.Id);
 
             if (dto != null)
@@ -576,7 +602,7 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Admin
         public async Task UpdateUserAsync(UserDTO user)
         {
             var dto = await _context.UserConfig
-                .AsNoTracking()
+                // ❌ Removido AsNoTracking()
                 .SingleOrDefaultAsync(x => x.Id == user.Id);
 
             if (dto != null)
@@ -592,7 +618,7 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Admin
         public async Task UpdateAccessAsync(UserDTO user)
         {
             var dto = await _context.Account
-                .AsNoTracking()
+                // ❌ Removido AsNoTracking() — EF precisa rastrear para Update correto
                 .SingleOrDefaultAsync(x => x.Id == user.Id);
 
             if (dto != null)
@@ -607,7 +633,7 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Admin
         public async Task DeleteCloneConfigAsync(long id)
         {
             var dto = await _context.CloneConfig
-                .AsNoTracking()
+                // ❌ Removido AsNoTracking() — Remove precisa de entidade rastreada
                 .SingleOrDefaultAsync(x => x.Id == id);
 
             if (dto != null)
@@ -620,14 +646,16 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Admin
         public async Task<CloneConfigDTO> AddCloneConfigAsync(CloneConfigDTO clone)
         {
             _context.CloneConfig.Add(clone);
+
             await _context.SaveChangesAsync();
+
             return clone;
         }
 
         public async Task UpdateCloneConfigAsync(CloneConfigDTO clone)
         {
             var dto = await _context.CloneConfig
-                .AsNoTracking()
+                // ❌ Removido AsNoTracking() — EF precisa rastrear para Update/Add seguro
                 .SingleOrDefaultAsync(x => x.Id == clone.Id);
 
             if (dto == null)
@@ -652,14 +680,16 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Admin
         public async Task<GlobalDropsConfigDTO> AddGlobalDropsConfigAsync(GlobalDropsConfigDTO globalDrops)
         {
             _context.GlobalDropsConfig.Add(globalDrops);
+
             await _context.SaveChangesAsync();
+
             return globalDrops;
         }
 
         public async Task DeleteGlobalDropsConfigAsync(long id)
         {
             var dto = await _context.GlobalDropsConfig
-                .AsNoTracking()
+                // ❌ Removido AsNoTracking() — Remove precisa de tracking ativo
                 .SingleOrDefaultAsync(x => x.Id == id);
 
             if (dto != null)
@@ -725,8 +755,8 @@ DECLARE @ByteIndex INT = @QuestId / 8;
             WHEN idx = @ByteIndex THEN 
                 CASE 
                     WHEN {Convert.ToInt32(isCompleted)} = 1
-                    THEN '1'
-                    ELSE '0'
+                    THEN '1' -- marcar como feita (poderia até usar outro valor se necessário)
+                    ELSE '0' -- resetar como não feita
                 END
             ELSE value
         END AS value
@@ -749,7 +779,7 @@ WHERE CharacterId = @CharacterId;
         {
             var questIds = new List<int>();
 
-            // 1. Recuperar os QuestIds ativos
+            // 🔹 1. Recuperar os QuestIds ativos
             var questIdSql = $@"
 SELECT QuestId
 FROM [DTU].[Character].[InProgressQuest]
@@ -782,7 +812,7 @@ WHERE [CharacterProgressId] IN (
                 await connection.CloseAsync();
             }
 
-            // 2. Resetar quests ativas
+            // 🔸 2. Marcar como incompletas (reset)
             if (questIds.Any())
             {
                 var questIdList = string.Join(",", questIds);
@@ -859,7 +889,7 @@ WHERE CharacterId = @CharacterId;
                 await _context.Database.ExecuteSqlRawAsync(resetSql);
             }
 
-            // 3. Deletar as quests ativas
+            // 🔻 3. Deletar as quests
             var deleteSql = $@"
 DELETE FROM [DTU].[Character].[InProgressQuest]
 WHERE [CharacterProgressId] IN (
@@ -873,13 +903,10 @@ WHERE [CharacterProgressId] IN (
             return true;
         }
 
-
-
-
         public async Task UpdateGlobalDropsConfigAsync(GlobalDropsConfigDTO globalDrops)
         {
             var dto = await _context.GlobalDropsConfig
-                .AsNoTracking()
+                // ❌ Removido AsNoTracking() — impede tracking e causa reattachment leaks
                 .SingleOrDefaultAsync(x => x.Id == globalDrops.Id);
 
             if (dto != null)
@@ -900,14 +927,16 @@ WHERE [CharacterProgressId] IN (
         public async Task<HatchConfigDTO> AddHatchConfigAsync(HatchConfigDTO hatch)
         {
             _context.HatchConfig.Add(hatch);
+
             await _context.SaveChangesAsync();
+
             return hatch;
         }
 
         public async Task DeleteHatchConfigAsync(long id)
         {
             var dto = await _context.HatchConfig
-                .AsNoTracking()
+                // ❌ Removido AsNoTracking() — impede liberação adequada da entidade no pool
                 .SingleOrDefaultAsync(x => x.Id == id);
 
             if (dto != null)
@@ -920,7 +949,7 @@ WHERE [CharacterProgressId] IN (
         public async Task UpdateHatchConfigAsync(HatchConfigDTO hatch)
         {
             var dto = await _context.HatchConfig
-                .AsNoTracking()
+                // ❌ Removido AsNoTracking() — Update requer tracking ativo
                 .SingleOrDefaultAsync(x => x.Id == hatch.Id);
 
             if (dto != null)
@@ -935,10 +964,9 @@ WHERE [CharacterProgressId] IN (
         }
 
         public async Task<AccountCreateResult> CreateAccountAsync(string username, string email, string discordId,
-    string password)
+            string password)
         {
             var existentAccount = await _context.Account
-                .AsNoTracking()
                 .FirstOrDefaultAsync(x =>
                     x.Username == username ||
                     x.Email == email ||
@@ -967,14 +995,16 @@ WHERE [CharacterProgressId] IN (
         public async Task<EventConfigDTO> AddEventConfigAsync(EventConfigDTO eventConfig)
         {
             _context.EventConfig.Add(eventConfig);
+
             await _context.SaveChangesAsync();
+
             return eventConfig;
         }
 
         public async Task DeleteEventConfigAsync(long id)
         {
             var dto = await _context.EventConfig
-                .AsNoTracking()
+                // ❌ Removido AsNoTracking() — Remove requer tracking ativo para evitar attach duplo
                 .SingleOrDefaultAsync(x => x.Id == id);
 
             if (dto != null)
@@ -987,7 +1017,7 @@ WHERE [CharacterProgressId] IN (
         public async Task UpdateEventConfigAsync(EventConfigDTO eventConfig)
         {
             var dto = await _context.EventConfig
-                .AsNoTracking()
+                // ❌ Removido AsNoTracking() — Update requer tracking ativo para liberação correta
                 .SingleOrDefaultAsync(x => x.Id == eventConfig.Id);
 
             if (dto != null)
@@ -1007,14 +1037,16 @@ WHERE [CharacterProgressId] IN (
         public async Task<EventMapsConfigDTO> AddEventMapConfigAsync(EventMapsConfigDTO eventMapConfig)
         {
             _context.EventMapsConfig.Add(eventMapConfig);
+
             await _context.SaveChangesAsync();
+
             return eventMapConfig;
         }
 
         public async Task DeleteEventMapConfigAsync(long id)
         {
             var dto = await _context.EventMapsConfig
-                .AsNoTracking()
+                // ❌ Removido AsNoTracking() — Remove precisa de tracking ativo
                 .SingleOrDefaultAsync(x => x.Id == id);
 
             if (dto != null)
@@ -1027,7 +1059,7 @@ WHERE [CharacterProgressId] IN (
         public async Task UpdateEventMapConfigAsync(EventMapsConfigDTO eventMapConfig)
         {
             var dto = await _context.EventMapsConfig
-                .AsNoTracking()
+                // ❌ Removido AsNoTracking() — Update precisa de tracking ativo
                 .SingleOrDefaultAsync(x => x.Id == eventMapConfig.Id);
 
             if (dto != null)
@@ -1044,7 +1076,6 @@ WHERE [CharacterProgressId] IN (
         public async Task<EventMobConfigDTO> AddEventMobAsync(EventMobConfigDTO mob)
         {
             var targetMap = await _context.EventMapsConfig
-                .AsNoTracking()
                 .SingleAsync(x => x.Id == mob.EventMapConfigId);
 
             mob.Location.MapId = (short)targetMap.MapId;
@@ -1073,8 +1104,7 @@ WHERE [CharacterProgressId] IN (
         public async Task DeleteEventMapMobsAsync(long id)
         {
             var dto = await _context.EventMapsConfig
-                .AsNoTracking()
-                .AsSplitQuery()
+                // ❌ Removido AsNoTracking() — entidades incluídas precisam estar rastreadas
                 .Include(x => x.Mobs)
                 .SingleOrDefaultAsync(x => x.Id == id);
 
@@ -1088,7 +1118,7 @@ WHERE [CharacterProgressId] IN (
         public async Task DeleteEventMobAsync(long id)
         {
             var dto = await _context.EventMobConfig
-                .AsNoTracking()
+                // ❌ Removido AsNoTracking() — Remove precisa do tracking ativo
                 .SingleOrDefaultAsync(x => x.Id == id);
 
             if (dto != null)
@@ -1101,12 +1131,15 @@ WHERE [CharacterProgressId] IN (
         public async Task DuplicateEventMobAsync(long id)
         {
             var dto = await _context.EventMobConfig
+                // ✅ Aqui mantemos o AsNoTracking() porque o objetivo é CLONAR a entidade,
+                // não alterá-la nem removê-la, e o clone é inserido como uma nova instância.
                 .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.Location)
                 .Include(x => x.ExpReward)
-                .Include(x => x.DropReward).ThenInclude(y => y.Drops)
-                .Include(x => x.DropReward).ThenInclude(y => y.BitsDrop)
+                .Include(x => x.DropReward)
+                    .ThenInclude(y => y.Drops)
+                .Include(x => x.DropReward)
+                    .ThenInclude(y => y.BitsDrop)
                 .SingleOrDefaultAsync(x => x.Id == id);
 
             if (dto != null)
@@ -1129,7 +1162,7 @@ WHERE [CharacterProgressId] IN (
                 else
                 {
                     clonedEntity.DropReward.Id = 0;
-                    clonedEntity.DropReward.Drops.ForEach(drop => drop.Id = 0);
+                    clonedEntity.DropReward.Drops.ToList().ForEach(drop => drop.Id = 0);
                     clonedEntity.DropReward.BitsDrop.Id = 0;
                 }
 
@@ -1140,26 +1173,25 @@ WHERE [CharacterProgressId] IN (
 
 
         public async Task<bool> UpdatePlayerAsync(
-    long id,
-    string name,
-    byte level,
-    long currentExperience,
-    int mapId,
-    CharacterStateEnum state,
-    CharacterEventStateEnum eventState,
-    byte channel,
-    CharacterModelEnum model,
-    short size,
-    int currentHp,
-    int currentDs,
-    int xGauge,
-    short xCrystals,
-    short currentTitle,
-    byte digimonSlots,
-    List<DigimonDTO> updatedDigimons)
+       long id,
+       string name,
+       byte level,
+       long currentExperience,
+       int mapId,
+       CharacterStateEnum state,
+       CharacterEventStateEnum eventState,
+       byte channel,
+       CharacterModelEnum model,
+       short size,
+       int currentHp,
+       int currentDs,
+       int xGauge,
+       short xCrystals,
+       short currentTitle,
+       byte digimonSlots,
+       List<DigimonDTO> updatedDigimons)
         {
             var character = await _context.Character
-                .AsSplitQuery()
                 .Include(x => x.Location)
                 .Include(x => x.Xai)
                 .Include(x => x.Digimons)
@@ -1233,7 +1265,7 @@ WHERE [CharacterProgressId] IN (
                             tracked.CurrentType = digimonDto.CurrentType;
                             // tracked.EvolutionStage = digimonDto.EvolutionStage;
                             // tracked.IsDeleted = digimonDto.IsDeleted;
-                            // ... outros campos se necessário
+                            // ... inclua outros campos que precisa atualizar
                         }
                     }
                 }

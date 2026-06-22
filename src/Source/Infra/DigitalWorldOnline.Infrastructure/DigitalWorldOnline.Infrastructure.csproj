@@ -36,8 +36,4 @@
     <ProjectReference Include="..\..\Application\DigitalWorldOnline.Application\DigitalWorldOnline.Application.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Folder Include="Repositories\Assets\" />
-  </ItemGroup>
-
 </Project>

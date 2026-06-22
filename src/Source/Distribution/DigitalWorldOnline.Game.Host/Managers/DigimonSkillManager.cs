@@ -35,7 +35,18 @@ namespace DigitalWorldOnline.Game.Managers
         private readonly PvpServer _pvpServer;
         private readonly AttackManager _attackManager;
         private readonly ISender _sender;
-        public DigimonSkillManager(AssetsLoader assets, MapServer mapServer, DungeonsServer dungeonServer, EventServer eventServer, PvpServer pvpServer, AttackManager attackManager, ISender sender)
+
+        private const bool LOG_DMG = false;
+        private const double LOG_SAMPLE = 1.0; // log em 100% dos hits
+
+        public DigimonSkillManager(
+            AssetsLoader assets,
+            MapServer mapServer,
+            DungeonsServer dungeonServer,
+            EventServer eventServer,
+            PvpServer pvpServer,
+            AttackManager attackManager,
+            ISender sender)
         {
             _assets = assets;
             _mapServer = mapServer;
@@ -48,166 +59,197 @@ namespace DigitalWorldOnline.Game.Managers
 
         public int SkillDamage(GameClient client, DigimonSkillAssetModel targetSkill, byte skillSlot)
         {
-            double skillDamage = 0;
+            // ===== Guardas =====
+            var partner = client?.Tamer?.Partner ?? client?.Partner;
+            var target = client?.Tamer?.TargetIMob;
+            if (partner == null || target == null)
+                return 0;
+
+            var skillInfo = _assets.DigimonSkillInfo
+                .FirstOrDefault(x => x.Type == partner.CurrentType && x.Slot == skillSlot);
+            if (skillInfo?.SkillInfo == null)
+                return 0;
 
             var skill = _assets.SkillCodeInfo.FirstOrDefault(x => x.SkillCode == targetSkill.SkillId);
-            var skillValue = skill.Apply
-                .Where(x => x.Type > 0)
-                .Take(3)
-                .ToList();
+            if (skill == null)
+                return 0;
 
-            var skillInfo = _assets.DigimonSkillInfo.FirstOrDefault(x => x.Type == client.Partner.CurrentType && x.Slot == skillSlot);
-            var partnerEvolution = client.Partner.Evolutions.FirstOrDefault(x => x.Type == client.Partner.CurrentType);
+            var skillValue = skill.Apply.Where(x => x.Type > 0).Take(3).ToList();
+            if (skillValue.Count == 0)
+                return 0;
 
-            if (skillInfo.SkillInfo.AreaOfEffect > 0 && skillInfo.SkillInfo.AoEMaxDamage != 0)
-            {
-                skillDamage += UtilitiesFunctions.RandomInt(skillInfo.SkillInfo.AoEMinDamage, skillInfo.SkillInfo.AoEMaxDamage);
-            }
-            else
-            {
-                skillDamage += skillValue[0].Value;
-            }
+            var partnerEvolution = partner.Evolutions.FirstOrDefault(x => x.Type == partner.CurrentType);
+            if (partnerEvolution == null || partnerEvolution.Skills == null || skillSlot >= partnerEvolution.Skills.Count)
+                return 0;
 
-            double f1BaseDamage = skillDamage + ((partnerEvolution.Skills[skillSlot].CurrentLevel) * skillValue[0].IncreaseValue);
+            var rnd = Random.Shared;
+
+            // Duração de buff/debuff base por skill
             int skillDuration = GetDurationBySkillId((int)skill.SkillCode);
             var durationBuff = UtilitiesFunctions.RemainingTimeSeconds(skillDuration);
 
-            double SkillFactor = 0;
-            int clonDamage = 0;
-            double attributeDamage = AttackManager.GetAttributeDamage(client);
-            double elementDamage = AttackManager.GetElementDamage(client);
-
-            var Percentual = (decimal)client.Partner.SCD / 100;
-            SkillFactor = (double)Percentual;
-            var activationChance = 0.0;
-
-            // -- CLON -------------------------------------------------------------------
-            double clonPercent = client.Tamer.Partner.Digiclone.ATValue / 100.0;
-            int cloValue = (int)(client.Tamer.Partner.BaseStatus.ATValue * clonPercent);
-
-            double factorFromPF = 144.0 / client.Tamer.Partner.Digiclone.ATValue;
-            double cloneFactor = Math.Round(1.0 + (0.43 / factorFromPF), 2);
-            // ---------------------------------------------------------------------------
-
-            f1BaseDamage = Math.Floor(f1BaseDamage * cloneFactor);
-            double addedf1Damage = Math.Floor(f1BaseDamage * SkillFactor / 100.0);
-            // ---------------------------------------------------------------------------
-
-            // Cálculo do dano base somando o valor de ATT
-            int baseDamage = (int)Math.Floor(f1BaseDamage + addedf1Damage + client.Tamer.Partner.AT + client.Tamer.Partner.SKD);
-
-            // Agora, somando o ATT para aumentar o dano proporcionalmente com um fator ajustado
-            double attBonusFactor = 1 + (client.Tamer.Partner.ATT / 9900.0); // Ajustado para 10000 ao invés de 1000
-            baseDamage = (int)(baseDamage * attBonusFactor);  // Aumento proporcional ao ATT
-
-
-            // clon Verification
-            if (client.Tamer.Partner.Digiclone.ATLevel > 0)
-                clonDamage = (int)(baseDamage * 0.301);
+            // ===== Base do dano do skill =====
+            double skillDamage;
+            if (skillInfo.SkillInfo.AreaOfEffect > 0 && skillInfo.SkillInfo.AoEMaxDamage != 0)
+                skillDamage = UtilitiesFunctions.RandomInt(skillInfo.SkillInfo.AoEMinDamage, skillInfo.SkillInfo.AoEMaxDamage);
             else
-                clonDamage = 0;
+                skillDamage = skillValue[0].Value;
 
-            // ---------------------------------------------------------------------------
+            var currentLevel = partnerEvolution.Skills[skillSlot].CurrentLevel;
+            double levelScaling = currentLevel * skillValue[0].IncreaseValue;
+
+            // Linha de base apenas com valores planos (nada de % aqui)
+            double baseLine = Math.Max(0.0, skillDamage + levelScaling + partner.AT + partner.SKD);
+
+            // ===== Montagem dos percentuais (todos aplicam só ao baseLine) =====
+            double ToFrac(double v) => (v >= 1000.0) ? v / 10000.0 : v / 100.0;
+            double ToPercent(double v) => (v >= 1000.0) ? v / 100.0 : v;
+
+            // SCD (fração) – ex.: 150% => 1.5
+            double scdPct = Math.Max(0.0, ToFrac(partner.SCD));
+
+            // ATT (fração) – ex.: 6641 -> 0.6641 (66.41%)
+            double attPct = Math.Max(0.0, ToFrac(partner.ATT));
+
+            // Elemento/Atributo já vêm como fração (-0.25..+1.0)
+            double attributePct = AttackManager.GetAttributeDamage(client);
+            double elementPct = AttackManager.GetElementDamage(client);
+
+            // Digiclone → converte fator para fração
+            double cloneAT = Math.Max(0.0, (double)partner.Digiclone.ATValue);
+            double cloneFactor = cloneAT > 0.0 ? Math.Round(1.0 + (0.43 / (144.0 / cloneAT)), 2) : 1.0;
+            double clonePct = cloneFactor - 1.0;
+
+            // Crítico
+            double critChance = Math.Clamp(ToFrac(partner.CC * 100.0), 0.0, 1.0);
+            double overcapCC = Math.Max(0.0, ToPercent(partner.CC) - 100.0);
+
+            // CD em "percent" normalizado (22359 -> 223.59)
+            double cdPercent = ToPercent(partner.CD);
+
+            // regra: cada 1% de CD => +0.5% de multiplicador crítico * 0.4
+            double cdEffect = (cdPercent * 0.01) * 0.75; // fração
+
+            double critMult = 1.0 + cdEffect + (overcapCC / 200.0);
+            critMult += ((double)partner.SKD / 500.0) * 0.01;
+
+            bool isCriticalHit = rnd.NextDouble() < critChance && critMult > 1.0;
+            double critPct = isCriticalHit ? (critMult - 1.0) : 0.0;
+
+            // A cada 1% ATT -> +0.1% dano final
+            double attFinalMult = 1.0 + ((partner.ATT / 100.0) * 0.01);
+
+            // A cada 1% CD -> +0.005x dano final
+            double cdFinalMult = 1.0 + cdEffect;
+
+            // ===== Soma “plana” dos percentuais e aplicação de soft cap =====
+            double sumPct = 0.0;
+            sumPct += scdPct;
+            sumPct += attFinalMult;
+            sumPct += attributePct;
+            sumPct += elementPct;
+            sumPct += clonePct;
+            sumPct += critPct;
+            sumPct += cdFinalMult;
+
+            // Ajusta limites conforme o meta — capUp: +200% (x3), capDown: -75% (min 25%)
+            double effPct = sumPct;
+
+            // Dano antes da mitigação (uma única multiplicação)
+            double preMitigation = Math.Floor(baseLine * (1.0 + effPct));
+
+            // ===== Ativação de efeitos secundários (buffs/debuffs) =====
+            double activationChance = 0.0;
             if (skillValue.Count > 1)
             {
-                var currentLevel = partnerEvolution.Skills[skillSlot].CurrentLevel;
-
-                if ((int)skillValue[1].Attribute != 39)
-                {
-                    activationChance += skillValue[1].Chance + currentLevel * 0;
-                }
-                else
-                {
-                    activationChance += skillValue[1].Chance + currentLevel * 0;
-                }
-
+                activationChance += skillValue[1].Chance;
                 if ((int)skillValue[1].Attribute != 37 && (int)skillValue[1].Attribute != 38)
                 {
                     durationBuff += currentLevel;
-                    skillDuration += currentLevel + 2; // 2 is for server clock???? something calculates 2 extra seconds
+                    skillDuration += currentLevel + 2;
                 }
             }
-
             if (skillValue.Count > 2)
             {
-                var currentLevel = partnerEvolution.Skills[skillSlot].CurrentLevel;
-
-                if ((int)skillValue[2].Attribute != 39)
-                {
-                    activationChance += skillValue[2].Chance + currentLevel * 0;
-                }
-                else
-                {
-                    activationChance += skillValue[2].Chance + currentLevel * 0;
-                }
-
+                activationChance += skillValue[2].Chance;
                 if ((int)skillValue[2].Attribute != 37 && (int)skillValue[2].Attribute != 38 && (int)skillValue[2].Attribute != 39)
                 {
                     durationBuff += currentLevel;
-                    skillDuration += currentLevel + 2; // 2 is for server clock???? something calculates 2 extra seconds
+                    skillDuration += currentLevel + 2;
                 }
             }
 
-            int attributeBonus = (int)Math.Floor(f1BaseDamage * attributeDamage);
-            int elementBonus = (int)Math.Floor(f1BaseDamage * elementDamage);
-
-            double activationProbability = activationChance / 100.0;
-            Random random = new Random();
-
-            bool isActivated = activationProbability >= 1.0 || random.NextDouble() <= activationProbability;
-
-            if (isActivated &&
-                ((skillValue.Count > 1 && skillValue[1].Type != 0) ||
-                 (skillValue.Count > 2 && skillValue[2].Type != 0)))
+            double activationProbability = Math.Max(0.0, Math.Min(1.0, activationChance / 100.0));
+            bool proc = activationProbability >= 1.0 || rnd.NextDouble() <= activationProbability;
+            if (proc && ((skillValue.Count > 1 && skillValue[1].Type != 0) || (skillValue.Count > 2 && skillValue[2].Type != 0)))
             {
-                BuffSkill(client, durationBuff, skillDuration, skillSlot);
+                try { BuffSkill(client, durationBuff, skillDuration, skillSlot); }
+                catch { /* não quebrar o tick se o proc falhar */ }
             }
 
-            int totalDamage = baseDamage + clonDamage + attributeBonus + elementBonus;
+            // ===== Mitigação por DEF (suave, sem negativos) =====
+            double enemyDef = Math.Max(0.0, (double)target.DEValue);
 
-            // Cálculo da chance de crítico com base no CC
-            int CCValue = client.Partner.CC;
+            const double MaxDefForCap = 50000.0;
+            const double MaxReduction = 0.50;
+            double defReductionPct = Math.Clamp(enemyDef / MaxDefForCap * MaxReduction, 0.0, MaxReduction);
 
-            // Calcula a chance de crítico como 7% do valor de CC
-            double criticalHitChance = Math.Min(Math.Max(CCValue / 142857.0, 0.0), 1.0);
+            double defMult = 1.0 - defReductionPct;
+            double totalDamage = preMitigation * defMult;
 
-            bool isCriticalHit = random.NextDouble() < criticalHitChance;
+            // Variação aleatória final ±10%
+            double rng = 0.90 + rnd.NextDouble() * 0.20; // 0.90..1.10
+            totalDamage *= rng;
 
-            if (isCriticalHit)
+            int finalDamage = Math.Max(0, (int)Math.Floor(totalDamage));
+
+            if (LOG_DMG)
             {
-                // Cálculo do bônus SKD no dano crítico
-                int skdValue = client.Tamer.Partner.SKD;
-                double skdBonus = (skdValue / 500) * 0.01; // 1% a cada 500 de SKD
-                totalDamage = (int)(totalDamage * 1.5); // Dano crítico com a base de 100%
+                string P(double x) => (x * 100.0).ToString("0.##"); // percent helper
 
-                // Calcular a porcentagem total de dano crítico (100% + bônus SKD)
-                double totalCritPercentage = 50.0 + (skdBonus * 100); // 100% base + bônus SKD
+                var sb = new StringBuilder();
+                sb.Append("[DMG] ");
+                sb.Append($"base={baseLine:0} | ");
+                sb.Append($"rawPct{{scd:{P(scdPct)}%,att:{P(attPct)}%,attr:{P(attributePct)}%,elem:{P(elementPct)}%,clone:{P(clonePct)}%,crit:{P(critPct)}%}} | ");
+                sb.Append($"sumRaw={P(sumPct)}% | ");
+                sb.Append($"CD={P(cdFinalMult)}% | ");
+                sb.Append($"ATTBonus={P(attFinalMult)}% | ");
+                sb.Append($"effPct={P(effPct)}% (x{1.0 + effPct:0.###}) | ");
+                sb.Append($"preMit={preMitigation:0} | ");
+                sb.Append($"DEF={enemyDef:0} (x{defMult:0.###}) => final={finalDamage}");
 
-                // Verifica se a mensagem de crítico deve ser exibida
-                if (client.EnableCriticalMessages)
+                // envia para consola do servidor
+                Console.WriteLine(sb.ToString());
+
+                // Se preferires ver in-game (apenas para GM, por ex.):
+                // if (client.Tamer?.IsGM == true)
+                //     client.Send(UtilitiesFunctions.GroupPackets(new SystemMessagePacket("[DBG] " + sb.ToString()).Serialize()));
+            }
+
+            // ===== Aplica dano no alvo + aggro consistente =====
+            try
+            {
+                var hp = target.ReceiveDamage(finalDamage, client.TamerId);
+                // Threat.Add(target.Id, client.TamerId, finalDamage, ThreatTag.SkillHit);
+                if (hp <= 0) target.Die();
+            }
+            catch { /* nunca deixar o tick do skill morrer por exceção aqui */ }
+
+            // ===== Feedback (não deixar UI quebrar o tick) =====
+            if (finalDamage > 0 && AttackManager.IsBattle)
+            {
+                try
                 {
-                    client.Send(UtilitiesFunctions.GroupPackets(
-                        new SystemMessagePacket(
-                            $"Crítico ativado! Chance de Crítico: {criticalHitChance:P2} | " +
-                            $"{client.Tamer.Partner.Name} usou {skillInfo.SkillInfo.Name} e causou {totalDamage} de dano. " +
-                            $"Dano Crítico: {totalCritPercentage:F2}% | By Takamura"
-                        ).Serialize()
-                    ));
+                    var msg = isCriticalHit
+                        ? $"{partner.Name} usou {skillInfo.SkillInfo.Name} e CRITOU {finalDamage} | DEF alvo {enemyDef}"
+                        : $"{partner.Name} usou {skillInfo.SkillInfo.Name} e causou {finalDamage} | DEF alvo {enemyDef}";
+
+                    client.Send(UtilitiesFunctions.GroupPackets(new SystemMessagePacket(msg).Serialize()));
                 }
+                catch { }
             }
 
-            // Envio da mensagem no chat de batalha (caso não tenha sido crítico)
-            if (totalDamage > 0 && AttackManager.IsBattle && !isCriticalHit)
-            {
-                client.Send(UtilitiesFunctions.GroupPackets(
-                    new SystemMessagePacket(
-                        $"Usou {skillInfo.SkillInfo.Name} E causou {totalDamage} de dano | " +
-                        $"Chance de Critico: {criticalHitChance:P2}"
-                    ).Serialize()
-                ));
-            }
-
-            return totalDamage;
+            return finalDamage;
         }
 
         private void BuffSkill(GameClient client, int duration, int skillDuration, byte skillSlot)
@@ -226,26 +268,26 @@ namespace DigitalWorldOnline.Game.Managers
             if (buff != null)
             {
                 var debuffs = new List<SkillCodeApplyAttributeEnum>
-        {
-            SkillCodeApplyAttributeEnum.CrowdControl,
-            SkillCodeApplyAttributeEnum.DOT,
-            SkillCodeApplyAttributeEnum.DOT2
-        };
+                {
+                    SkillCodeApplyAttributeEnum.CrowdControl,
+                    SkillCodeApplyAttributeEnum.DOT,
+                    SkillCodeApplyAttributeEnum.DOT2
+                };
 
                 var buffs = new List<SkillCodeApplyAttributeEnum>
-        {
-            SkillCodeApplyAttributeEnum.MS,
-            SkillCodeApplyAttributeEnum.SCD,
-            SkillCodeApplyAttributeEnum.CC,
-            SkillCodeApplyAttributeEnum.AS,
-            SkillCodeApplyAttributeEnum.AT,
-            SkillCodeApplyAttributeEnum.HP,
-            SkillCodeApplyAttributeEnum.DamageShield,
-            SkillCodeApplyAttributeEnum.CA,
-            SkillCodeApplyAttributeEnum.Unbeatable,
-            SkillCodeApplyAttributeEnum.DR,
-            SkillCodeApplyAttributeEnum.EV
-        };
+                {
+                    SkillCodeApplyAttributeEnum.MS,
+                    SkillCodeApplyAttributeEnum.SCD,
+                    SkillCodeApplyAttributeEnum.CC,
+                    SkillCodeApplyAttributeEnum.AS,
+                    SkillCodeApplyAttributeEnum.AT,
+                    SkillCodeApplyAttributeEnum.HP,
+                    SkillCodeApplyAttributeEnum.DamageShield,
+                    SkillCodeApplyAttributeEnum.CA,
+                    SkillCodeApplyAttributeEnum.Unbeatable,
+                    SkillCodeApplyAttributeEnum.DR,
+                    SkillCodeApplyAttributeEnum.EV
+                };
 
                 for (int i = 1; i <= 2; i++)
                 {
@@ -262,7 +304,7 @@ namespace DigitalWorldOnline.Game.Managers
                                 var activeBuff = client.Tamer.Partner.BuffList.Buffs.FirstOrDefault(x => x.BuffId == buff.BuffId);
                                 switch (attribute)
                                 {
-                                    case SkillCodeApplyAttributeEnum.DR: //reflect damage
+                                    case SkillCodeApplyAttributeEnum.DR: // reflect damage
                                         if (activeBuff == null)
                                         {
                                             newDigimonBuff.SetBuffInfo(buff);
@@ -281,7 +323,6 @@ namespace DigitalWorldOnline.Game.Managers
                                             Task.Run(async () =>
                                             {
                                                 await Task.Delay(1500);
-
 
                                                 for (int i = 0; i < reflectDamageDuration; i++)
                                                 {
@@ -442,82 +483,36 @@ namespace DigitalWorldOnline.Game.Managers
 
                                     case SkillCodeApplyAttributeEnum.DOT:
                                     case SkillCodeApplyAttributeEnum.DOT2:
+                                        if (debuffsValue > selectedMob.CurrentHP)
+                                            debuffsValue = selectedMob.CurrentHP;
+
+                                        broadcastAction(client.TamerId, new AddBuffPacket(
+                                            selectedMob.GeneralHandler, buff, partnerEvolution.Skills[skillSlot].CurrentLevel, duration).Serialize());
+
+                                        if (activeDebuff != null)
                                         {
-                                            // AT base do Digimon
-                                            int baseAT = client.Tamer.Partner.AT;
-
-                                            // Percentual: DOT = 40% do AT | DOT2 = 60% do AT
-                                            double percent = (skillValue[i].Attribute == SkillCodeApplyAttributeEnum.DOT2) ? 0.6 : 0.4;
-
-                                            // Dano fixo por tick (1 segundo)
-                                            int perTick = (int)Math.Max(1, Math.Floor(baseAT * percent));
-
-                                            // Mostra o buff no alvo
-                                            broadcastAction(client.TamerId, new AddBuffPacket(
-                                                selectedMob.GeneralHandler,
-                                                buff,
-                                                partnerEvolution.Skills[skillSlot].CurrentLevel,
-                                                duration
-                                            ).Serialize());
-
-                                            // Registra o debuff
-                                            var dotDebuff = selectedMob.DebuffList.Buffs.FirstOrDefault(x => x.BuffId == buff.BuffId);
-                                            if (dotDebuff != null)
-                                            {
-                                                dotDebuff.IncreaseEndDate(skillDuration);
-                                            }
-                                            else
-                                            {
-                                                var newDot = MobDebuffModel.Create(buff.BuffId, (int)skillCode.SkillCode, 0, skillDuration);
-                                                newDot.SetBuffInfo(buff);
-                                                selectedMob.DebuffList.Buffs.Add(newDot);
-                                            }
-
-                                            // Loop de DOT a cada 1 segundo
-                                            _ = Task.Run(async () =>
-                                            {
-                                                int remaining = skillDuration;
-
-                                                while (remaining > 0 && selectedMob != null && selectedMob.CurrentHP > 0)
-                                                {
-                                                    int tickDamage = Math.Min(perTick, selectedMob.CurrentHP);
-                                                    int newHp = selectedMob.ReceiveDamage(tickDamage, client.TamerId);
-
-                                                    broadcastAction(client.TamerId, new AddDotDebuffPacket(
-                                                        client.Tamer.Partner.GeneralHandler,
-                                                        selectedMob.GeneralHandler,
-                                                        buff.BuffId,
-                                                        selectedMob.CurrentHpRate,
-                                                        tickDamage,
-                                                        (byte)((newHp > 0) ? 0 : 1)
-                                                    ).Serialize());
-
-                                                    if (newHp <= 0)
-                                                    {
-                                                        selectedMob.Die();
-                                                        break;
-                                                    }
-
-                                                    await Task.Delay(1000);
-                                                    remaining--;
-                                                }
-
-                                                // Remove debuff no fim
-                                                if (selectedMob != null)
-                                                {
-                                                    var left = selectedMob.DebuffList.Buffs.FirstOrDefault(x => x.BuffId == buff.BuffId);
-                                                    if (left != null)
-                                                    {
-                                                        selectedMob.DebuffList.Buffs.Remove(left);
-                                                        broadcastAction(client.Tamer.Id,
-                                                            new RemoveBuffPacket(client.Tamer.Partner.GeneralHandler, left.BuffId).Serialize());
-                                                    }
-                                                }
-                                            });
-
-                                            break;
+                                            activeDebuff.IncreaseEndDate(skillDuration);
+                                        }
+                                        else
+                                        {
+                                            selectedMob.DebuffList.Buffs.Add(newMobDebuff);
                                         }
 
+                                        Task.Delay(skillDuration * 1000).ContinueWith(_ =>
+                                        {
+                                            if (selectedMob == null) return;
+                                            var newHp = selectedMob.ReceiveDamage(debuffsValue, client.TamerId);
+
+                                            broadcastAction(client.TamerId, new AddDotDebuffPacket(
+                                                client.Tamer.Partner.GeneralHandler, selectedMob.GeneralHandler,
+                                                newMobDebuff.BuffId, selectedMob.CurrentHpRate, debuffsValue, (byte)((newHp > 0) ? 0 : 1)).Serialize());
+
+                                            if (newHp <= 0)
+                                            {
+                                                selectedMob.Die();
+                                            }
+                                        });
+                                        break;
                                 }
                                 break;
                         }
@@ -560,5 +555,23 @@ namespace DigitalWorldOnline.Game.Managers
             };
         }
 
+        // ===== Utilitário de soft cap para soma de percentuais =====
+        // sumPct: ex. 0.25 = +25%, -0.30 = -30%
+        // capUp: ganho máximo (ex. +200% => 2.0)
+        // capDown: perda máxima (ex. -75% => -0.75)
+        private static double SoftCapAdditive(double sumPct, double capUp = 2.0, double capDown = -0.75)
+        {
+            if (sumPct >= 0.0)
+            {
+                // Satura em +capUp (curva exponencial suave)
+                return capUp * (1.0 - Math.Exp(-(sumPct / capUp)));
+            }
+            else
+            {
+                double cap = Math.Abs(capDown);
+                double neg = cap * (1.0 - Math.Exp(-(-sumPct / cap)));
+                return -neg;
+            }
+        }
     }
 }

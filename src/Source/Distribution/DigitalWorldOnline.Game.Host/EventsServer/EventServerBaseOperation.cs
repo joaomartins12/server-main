@@ -26,6 +26,9 @@ namespace DigitalWorldOnline.GameHost.EventsServer
         private DateTime _lastConsignedShopsSearch = DateTime.Now;
         private byte _loadChannel = 0;
 
+        // Background sync task for maps and objects
+        private Task? _backgroundSyncTask;
+
         //TODO: externalizar
         private readonly int _startToSee = 18000;
         private readonly int _stopSeeing = 18001;
@@ -204,13 +207,18 @@ namespace DigitalWorldOnline.GameHost.EventsServer
         /// <param name="cancellationToken">Control token for the operation</param>
         public async Task StartAsync(CancellationToken cancellationToken)
         {
+            // Start background sync loop to avoid blocking the main map loop on DB calls
+            if (_backgroundSyncTask == null || _backgroundSyncTask.IsCompleted)
+            {
+                _backgroundSyncTask = Task.Run(() => SyncMapsAndObjectsLoop(cancellationToken), cancellationToken);
+            }
+
             while (!cancellationToken.IsCancellationRequested)
             {
                 try
                 {
                     await CleanMaps();
-                    await SearchNewMaps(cancellationToken);
-                    await GetMapObjects(cancellationToken);
+                    // SearchNewMaps and GetMapObjects are executed in background by SyncMapsAndObjectsLoop
                     var tasks = new List<Task>();
 
                     Maps.ForEach(map => { tasks.Add(RunMap(map)); });
@@ -928,6 +936,36 @@ namespace DigitalWorldOnline.GameHost.EventsServer
 
                 var response = await client.SendAsync(request);
                 var responseString = await response.Content.ReadAsStringAsync();
+            }
+        }
+
+        // Background loop that periodically syncs maps and map objects from the database.
+        private async Task SyncMapsAndObjectsLoop(CancellationToken cancellationToken)
+        {
+            try
+            {
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await SearchNewMaps(cancellationToken);
+                        await GetMapObjects(cancellationToken);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Error(ex, "[EVENT SYNC LOOP] Error while syncing maps or map objects");
+                    }
+
+                    try { await Task.Delay(1000, cancellationToken); } catch (OperationCanceledException) { break; }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error(ex, "[EVENT SYNC LOOP] Fatal error in background sync loop");
             }
         }
     }

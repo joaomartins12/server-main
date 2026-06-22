@@ -88,7 +88,7 @@ namespace DigitalWorldOnline.Admin.Pages.Players
                     Player.XCrystals,
                     Player.CurrentTitle,
                     Player.DigimonSlots,
-                    Player.Digimons // <- Aqui você garante que está enviando a lista atualizada
+                    Player.Digimons // <- Aqui vocï¿½ garante que estï¿½ enviando a lista atualizada
                 );
 
                 var result = await Sender.Send(command);
@@ -226,7 +226,7 @@ namespace DigitalWorldOnline.Admin.Pages.Players
             {
                 _isUpdatingQuest = true;
                 var result = await Sender.Send(new UpdatePlayerQuestsCommand(
-                 characterId: Player.Id, // Usando o nome correto do parâmetro
+                 characterId: Player.Id, // Usando o nome correto do parï¿½metro
                  questId: _questIdToUpdate,
                  isCompleted: _questCompletionStatus
              ));

@@ -1,4 +1,5 @@
-﻿using DigitalWorldOnline.Commons.Entities;
+﻿using DigitalWorldOnline.Application.Separar.Queries;
+using DigitalWorldOnline.Commons.Entities;
 using DigitalWorldOnline.Commons.Enums;
 using DigitalWorldOnline.Commons.Enums.PacketProcessor;
 using DigitalWorldOnline.Commons.Interfaces;
@@ -16,56 +17,43 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
         private readonly MapServer _mapServer;
         private readonly DungeonsServer _dungeonServer;
+        private readonly EventServer _eventServer;
+        private readonly PvpServer _pvpServer;
         private readonly ILogger _logger;
         private readonly ISender _sender;
 
-        public PartnerStopPacketProcessor(
-            MapServer mapServer,
-            DungeonsServer dungeonsServer,
-            ILogger logger,
-            ISender sender)
+        public PartnerStopPacketProcessor(MapServer mapServer, DungeonsServer dungeonsServer, EventServer eventServer, PvpServer pvpServer, ILogger logger, ISender sender)
         {
             _mapServer = mapServer;
             _dungeonServer = dungeonsServer;
+            _eventServer = eventServer;
+            _pvpServer = pvpServer;
             _logger = logger;
             _sender = sender;
         }
 
         public async Task Process(GameClient client, byte[] packetData)
         {
-            if (client?.Partner == null)
-                return;
+            client.Tamer.Partner.StopAutoAttack();
 
-            var partner = client.Partner;
-            var attackerHandler = partner.GeneralHandler;
+            var mapConfig = await _sender.Send(new GameMapConfigByMapIdQuery(client.Tamer.Location.MapId));
 
-            // Para apenas o auto attack (não mexe em skills)
-            partner.StopAutoAttack();
-
-            // Se não há mobs mais em aggro, sai do combate
-            Func<short, long, bool> broadcastMobs = client.DungeonMap
-                ? _dungeonServer.IMobsAttacking
-                : _mapServer.IMobsAttacking;
-
-            if (!broadcastMobs(client.Tamer.Location.MapId, client.TamerId))
+            switch (mapConfig!.Type)
             {
-                client.Tamer.StopBattle(true);
-
-                // broadcast apenas em dungeon/map
-                if (client.DungeonMap)
-                {
-                    _dungeonServer.BroadcastForTamerViewsAndSelf(client.TamerId,
-                        new SetCombatOffPacket(attackerHandler).Serialize());
-                }
-                else
-                {
-                    _mapServer.BroadcastForTamerViewsAndSelf(client.TamerId,
-                        new SetCombatOffPacket(attackerHandler).Serialize());
-                }
+                case MapTypeEnum.Dungeon:
+                    _dungeonServer.BroadcastForTamerViewsAndSelf(client.TamerId, new PartnerStopPacket(client.Tamer.Partner.GeneralHandler).Serialize());
+                    break;
+                case MapTypeEnum.Event:
+                    _eventServer.BroadcastForTamerViewsAndSelf(client.TamerId, new PartnerStopPacket(client.Tamer.Partner.GeneralHandler).Serialize());
+                    break;
+                case MapTypeEnum.Pvp:
+                    _pvpServer.BroadcastForTamerViewsAndSelf(client.TamerId, new PartnerStopPacket(client.Tamer.Partner.GeneralHandler).Serialize());
+                    break;
+                default:
+                    _mapServer.BroadcastForTamerViewsAndSelf(client.TamerId, new PartnerStopPacket(client.Tamer.Partner.GeneralHandler).Serialize());
+                    break;
             }
 
-            _logger.Information($"[Stop] Partner {partner.Id} parou auto-attack para {client.Tamer?.Name ?? "Unknown"}.");
-            await Task.CompletedTask;
         }
     }
 }

@@ -1,5 +1,4 @@
-﻿
-using DigitalWorldOnline.Commons.Utils;
+﻿using DigitalWorldOnline.Commons.Utils;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -24,26 +23,18 @@ namespace DigitalWorldOnline.Infrastructure
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
-            try
+            if (!optionsBuilder.IsConfigured)
             {
-                optionsBuilder.UseSqlServer("Server=127.0.0.1;Database=dmo;Trusted_Connection=True;TrustServerCertificate=True;Encrypt=False;", sqlServerOptions =>
+                var connectionString = _configuration?.GetConnectionString("Default")
+                    ?? "Server=38.143.19.42,1433;Database=dmo;User Id=sa;Password=teste12!;Encrypt=False;TrustServerCertificate=True;Pooling=true;Min Pool Size=50;Max Pool Size=1000;Connection Lifetime=180;";
+
+                optionsBuilder.UseSqlServer(connectionString, sqlServerOptions =>
                 {
-                    sqlServerOptions.EnableRetryOnFailure(
-                        maxRetryCount: 5, // Número máximo de tentativas
-                        maxRetryDelay: TimeSpan.FromSeconds(3), // Tempo máximo de espera entre as tentativas
-                        errorNumbersToAdd: null // Lista de códigos de erro adicionais para considerar como transitórios
-                    );
+                    sqlServerOptions.EnableRetryOnFailure(5, TimeSpan.FromSeconds(3), null);
                 });
-            }
-            catch (SqlException ex)
-            {
-                Console.WriteLine("Error connecting to the database:\n" + ex.Message);
-                throw;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("Error configuring the database connection:\n" + ex.Message);
-                throw;
+
+                // Add command interceptor to log each DB command and its duration
+                optionsBuilder.AddInterceptors(new DbCommandLoggerInterceptor(_configuration));
             }
         }
 

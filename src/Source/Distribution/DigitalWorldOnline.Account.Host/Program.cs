@@ -40,9 +40,9 @@ namespace DigitalWorldOnline.Account
             {
                 var message = "";
                 var exceptionStackTrace = "";
-                if (e.ExceptionObject is Exception exception)
+                if (e.ExceptionObject is Exception exception) 
                 {
-                    message = exception.Message;
+                    message =  exception.Message;
                     exceptionStackTrace = exception.StackTrace;
                 }
                 Console.WriteLine($"{message}");
@@ -50,9 +50,7 @@ namespace DigitalWorldOnline.Account
                 Console.WriteLine("Terminating by unhandled exception...");
             }
             else
-            {
                 Console.WriteLine("Received unhandled exception.");
-            }
 
             Console.ReadLine();
         }
@@ -90,7 +88,7 @@ namespace DigitalWorldOnline.Account
 
                     services.AddScoped<IRoutineRepository, RoutineRepository>();
 
-                    // services.AddScoped<IEmailService, EmailService>();
+                    //services.AddScoped<IEmailService, EmailService>();
 
                     services.AddSingleton<ISender, ScopedSender<Mediator>>();
                     services.AddSingleton<IProcessor, AuthenticationPacketProcessor>();
@@ -114,53 +112,13 @@ namespace DigitalWorldOnline.Account
                     hostConfig.SetBasePath(Directory.GetCurrentDirectory())
                         .AddEnvironmentVariables(Constants.Configuration.EnvironmentPrefix)
                         .AddUserSecrets<Program>();
-                })
-                .Build();
+                }).Build();
 
-            // ===== MIGRAÇÕES OPCIONAIS NO ARRANQUE =====
-            // appsettings.json: { "ApplyMigrationsOnStartup": false }
-            var cfg = host.Services.GetRequiredService<IConfiguration>();
-            var applyMigrations = cfg.GetValue<bool?>("ApplyMigrationsOnStartup") ?? false; // default: false
-
-            if (applyMigrations)
-            {
-                using var scope = host.Services.CreateScope();
-                var db = scope.ServiceProvider.GetRequiredService<DatabaseContext>();
-
-                try
-                {
-                    var pending = db.Database.GetPendingMigrations().ToList();
-                    if (pending.Count > 0)
-                        Console.WriteLine($"[EF] Pending migrations: {string.Join(", ", pending)}");
-                    else
-                        Console.WriteLine("[EF] No pending migrations.");
-
-                    db.Database.Migrate();
-
-                    var last = db.Database.GetAppliedMigrations().LastOrDefault();
-                    Console.WriteLine($"[EF] Last applied migration: {last ?? "(none)"}");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine("==== EF MIGRATION ERROR ====");
-                    Console.WriteLine(ex.Message);
-                    Console.WriteLine(ex.StackTrace);
-
-                    try
-                    {
-                        var last = db.Database.GetAppliedMigrations().LastOrDefault();
-                        var next = db.Database.GetPendingMigrations().FirstOrDefault();
-                        Console.WriteLine($"Applied last: {last ?? "(none)"} | Failing (likely): {next ?? "(unknown)"}");
-                    }
-                    catch { /* ignore */ }
-
-                    throw; // impede arrancar com DB inconsistente; se quiseres arrancar mesmo assim, comenta este throw
-                }
-            }
-            else
-            {
-                Console.WriteLine("[EF] Skipping migrations on startup (ApplyMigrationsOnStartup=false).");
-            }
+            // Applying migrations. It's enough to do this on the AccountServer, for now.
+            var scopeFactory = host.Services.GetService<IServiceScopeFactory>();
+            using var scope = scopeFactory.CreateScope();
+            var context = scope.ServiceProvider.GetService<DatabaseContext>();
+            context.Database.Migrate();
 
             return host;
         }
@@ -186,6 +144,49 @@ namespace DigitalWorldOnline.Account
                     .Filter.ByIncludingOnly(e => e.Level == LogEventLevel.Error)
                     .WriteTo.RollingFile(configuration["Log:ErrorRepository"] ?? "logs\\Error\\AccountServer", retainedFileCountLimit: 5))
                 .CreateLogger();
+        }
+        private void LogMessage(ConsoleColor color, string message)
+        {
+            Console.ForegroundColor = ConsoleColor.Magenta;
+
+            Console.WriteLine("|----------------------------------------------------|");
+            Console.WriteLine("|                                                    |");
+            Console.WriteLine("|               ██████   ████████  ██    ██          |");
+            Console.WriteLine("|               ██   ██     ██     ██    ██          |");
+            Console.WriteLine("|               ██   ██     ██     ██    ██          |");
+            Console.WriteLine("|               ██   ██     ██     ██    ██          |");
+            Console.WriteLine("|               ██████      ██      ██████           |");
+            Console.WriteLine("|                                                    |");
+            Console.WriteLine("|----------------------------------------------------|");
+
+            // Exibe a história (centralizada dentro de 52 caracteres)
+            PrintCenteredLine("Um novo desafio se aproxima...");
+            PrintCenteredLine("As trevas emergem das profundezas digitais.");
+            PrintCenteredLine("Somente os mais fortes sobreviverão.");
+            PrintCenteredLine("A jornada começa agora.");
+
+            Console.WriteLine("|                                                    |");
+            Console.WriteLine("|----------------------------------------------------|");
+
+            // Mensagem personalizada
+            PrintCenteredLine(message.ToUpper());
+
+            Console.WriteLine("|                                                    |");
+
+            // Assinatura final
+            PrintCenteredLine("DTU");
+
+            Console.WriteLine("|----------------------------------------------------|");
+            Console.ResetColor();
+        }
+
+        // Função auxiliar para centralizar texto dentro da borda
+        private void PrintCenteredLine(string text)
+        {
+            int totalWidth = 52;
+            int padding = (totalWidth - text.Length) / 2;
+            string line = "|" + new string(' ', padding) + text + new string(' ', totalWidth - text.Length - padding) + "|";
+            Console.WriteLine(line);
         }
     }
 }

@@ -1,44 +1,24 @@
 ﻿@using Microsoft.AspNetCore.WebUtilities
-@using MudBlazor
+
 @inject NavigationManager Nav
 
-<!-- feedback visual enquanto faz o redirect -->
-<MudOverlay Visible="true" DarkBackground="true">
-    <div style="text-align:center">
-        <MudProgressCircular Indeterminate="true" />
-        <MudText Typo="Typo.body2" Class="mt-2">A redirecionar…</MudText>
-    </div>
-</MudOverlay>
-
-@code {
-    protected override void OnAfterRender(bool firstRender)
+@code 
+{
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
-            Redirect();
+        await base.OnAfterRenderAsync(firstRender);
+
+        Redirect();
     }
 
     private void Redirect()
     {
-        var uri = new Uri(Nav.Uri);
-        var path = uri.AbsolutePath;                // e.g. /players
-        var queryString = uri.Query;                // e.g. ?page=2
-        var isLogin = path.Equals("/login", StringComparison.OrdinalIgnoreCase);
+        var absoluteUri = Nav.ToAbsoluteUri(Nav.Uri);
+        var currentPage = absoluteUri.PathAndQuery;
 
-        // Se já estamos no login, não fazer nada para evitar loop
-        if (isLogin)
-            return;
-
-        // home sem returnUrl
-        if (path == "/" || string.IsNullOrEmpty(path))
-        {
-            Nav.NavigateTo("/login", forceLoad: true);
-            return;
-        }
-
-        // anexar returnUrl (com a query original, se existir), de forma segura
-        var returnUrl = path + queryString;         // preserva filtros/paginação
-        var loginUrl = QueryHelpers.AddQueryString("/login", "returnUrl", returnUrl);
-
-        Nav.NavigateTo(loginUrl, forceLoad: true);
+        if (!string.IsNullOrEmpty(currentPage) && currentPage != "/" && currentPage != "/login")
+            Nav.NavigateTo($"/login?returnUrl={currentPage}", true);
+        else
+            Nav.NavigateTo($"/login", true);
     }
 }

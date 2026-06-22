@@ -11,6 +11,7 @@ using DigitalWorldOnline.Commons.Models.Map;
 using DigitalWorldOnline.Commons.Models.Summon;
 using DigitalWorldOnline.Commons.Models.TamerShop;
 using DigitalWorldOnline.Commons.Packets.MapServer;
+using DigitalWorldOnline.Game.Managers;
 using Newtonsoft.Json;
 using System.Diagnostics;
 using System.Text;
@@ -24,6 +25,13 @@ namespace DigitalWorldOnline.GameHost
         private DateTime _lastMobsSearch = DateTime.Now;
         private DateTime _lastConsignedShopsSearch = DateTime.Now;
         private byte _loadChannel = 0;
+
+        // Background sync task for maps and objects
+        private Task? _backgroundSyncTask;
+
+        // Cache for map templates to avoid DB calls on client connect
+        private readonly object _cacheLock = new object();
+        private List<GameMap> _cachedMapTemplates = new List<GameMap>();
 
         //TODO: externalizar
         private readonly int _startToSee = 18000;
@@ -63,10 +71,17 @@ namespace DigitalWorldOnline.GameHost
         /// </summary>
         public async Task SearchNewMaps(CancellationToken cancellationToken)
         {
+            Stopwatch stopwatch = Stopwatch.StartNew();
             if (DateTime.Now > _lastMapsSearch)
             {
                 var mapsToLoad =
                     _mapper.Map<List<GameMap>>(await _sender.Send(new GameMapsConfigQuery(MapTypeEnum.Default), cancellationToken));
+
+                // Update cache of templates
+                lock (_cacheLock)
+                {
+                    _cachedMapTemplates = mapsToLoad.Select(m => _mapper.Map<GameMap>(m)).ToList();
+                }
 
                 foreach (var newMap in mapsToLoad)
                 {
@@ -79,6 +94,7 @@ namespace DigitalWorldOnline.GameHost
 
                 _lastMapsSearch = DateTime.Now.AddSeconds(5);
             }
+            _logger.Information($"[MAP SEARCH] Maps search completed in {stopwatch.ElapsedMilliseconds}ms");
         }
 
         public async Task SearchNewMaps(GameClient client)
@@ -100,6 +116,12 @@ namespace DigitalWorldOnline.GameHost
                         }
                     }
                 }
+            }
+
+            // Also update cache
+            lock (_cacheLock)
+            {
+                _cachedMapTemplates = mapsToLoad.Select(m => _mapper.Map<GameMap>(m)).ToList();
             }
 
             _lastMapsSearch = DateTime.Now.AddSeconds(5);
@@ -135,8 +157,12 @@ namespace DigitalWorldOnline.GameHost
         /// </summary>
         public async Task GetMapObjects(CancellationToken cancellationToken)
         {
+            Stopwatch stopwatch = Stopwatch.StartNew();
             await GetMapConsignedShops(cancellationToken);
+            _logger.Information($"[MAP OBJECTS] Consigned shops synced in {stopwatch.ElapsedMilliseconds}ms");
+            stopwatch.Restart();
             await GetMapMobs(cancellationToken);
+            _logger.Information($"[MAP OBJECTS] Mobs synced in {stopwatch.ElapsedMilliseconds}ms");
         }
 
         /// <summary>
@@ -152,10 +178,8 @@ namespace DigitalWorldOnline.GameHost
 
                 foreach (var map in initializedMaps)
                 {
-                    // Fetch mob configurations for the map
-                    var mapMobs = _mapper.Map<IList<MobConfigModel>>(
-                        await _sender.Send(new MapMobConfigsQuery(map.Id), cancellationToken)
-                    );
+                    // Fetch mob configurations for the map using MobManager to benefit from cache/coalescing
+                    var mapMobs = await _mobManager.GetMobsForMapAsync(map.Id, cancellationToken);
 
                     // Check if an update is necessary and apply it
                     if (map.RequestMobsUpdate(mapMobs))
@@ -173,35 +197,9 @@ namespace DigitalWorldOnline.GameHost
         /// <returns>The consigned shops collection</returns>
         private async Task GetMapConsignedShops(CancellationToken cancellationToken)
         {
-            var initializedMaps = Maps.Where(x => x.Initialized).ToList();
-
-            foreach (var map in initializedMaps)
-            {
-                if (map.Operating)
-                    continue;
-
-                // 🔹 Força refresh se não tiver nenhuma shop
-                // 🔹 Ou se já passou o tempo do último refresh
-                if (!map.ConsignedShops.Any() || DateTime.Now >= _lastConsignedShopsSearch)
-                {
-                    var consignedShops = _mapper.Map<List<ConsignedShop>>(
-                        await _sender.Send(new ConsignedShopsQuery((int)map.Id), cancellationToken)
-                    );
-
-                    // Atualiza a lista de lojas ativas no mapa
-                    map.UpdateConsignedShops(consignedShops);
-
-                    // Envia update para todos jogadores conectados nesse mapa
-                    foreach (var tamer in map.ConnectedTamers)
-                    {
-                        ForceShopsync(map, tamer);
-                    }
-                }
-            }
-
-            // Atualiza apenas uma vez o timer global
-            if (DateTime.Now >= _lastConsignedShopsSearch)
-                _lastConsignedShopsSearch = DateTime.Now.AddSeconds(15);
+            // Delegated entirely to ConsignedShopManager via _shopManager.SyncPlayerShopsAsync in map loop.
+            // Previous DB polling removed to reduce duplicate ConsignedShopsQuery load.
+            await Task.CompletedTask;
         }
 
         /// <summary>
@@ -210,13 +208,18 @@ namespace DigitalWorldOnline.GameHost
         /// <param name="cancellationToken">Control token for the operation</param>
         public async Task StartAsync(CancellationToken cancellationToken)
         {
+            // Start background sync loop to avoid blocking the main map loop on DB calls
+            if (_backgroundSyncTask == null || _backgroundSyncTask.IsCompleted)
+            {
+                _backgroundSyncTask = Task.Run(() => SyncMapsAndObjectsLoop(cancellationToken), cancellationToken);
+            }
+
             while (!cancellationToken.IsCancellationRequested)
             {
                 try
                 {
                     await CleanMaps();
-                    await SearchNewMaps(cancellationToken);
-                    await GetMapObjects(cancellationToken);
+                    // SearchNewMaps and GetMapObjects are executed in background by SyncMapsAndObjectsLoop
 
                     var tasks = new List<Task>();
 
@@ -224,7 +227,7 @@ namespace DigitalWorldOnline.GameHost
 
                     await Task.WhenAll(tasks);
 
-                    await Task.Delay(500, cancellationToken);
+                    await Task.Delay(100, cancellationToken);
                 }
                 catch (Exception ex)
                 {
@@ -248,6 +251,7 @@ namespace DigitalWorldOnline.GameHost
                 var stopwatch = new Stopwatch();
                 stopwatch.Start();
 
+                // Operações do mapa
                 var tamerStopwatch = new Stopwatch();
                 tamerStopwatch.Start();
                 await Task.Run(() => TamerOperation(map));
@@ -263,10 +267,42 @@ namespace DigitalWorldOnline.GameHost
                 await Task.Run(() => DropsOperation(map));
                 dropsStopwatch.Stop();
 
+                // 🔹 Adicionamos aqui a sincronização das lojas
+                var shopStopwatch = new Stopwatch();
+                shopStopwatch.Start();
+
+                if (map.Clients.Any())
+                {
+                    foreach (var client in map.Clients)
+                    {
+                        if (client?.Tamer != null && client.IsConnected)
+                        {
+                            try
+                            {
+                                await _shopManager.SyncPlayerShopsAsync(client);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.Error(ex, "[SHOP MANAGER] Erro ao sincronizar lojas para {Tamer}", client.Tamer?.Name ?? "Unknown");
+                            }
+                        }
+                    }
+                }
+
+                shopStopwatch.Stop();
+
                 stopwatch.Stop();
                 var totalTime = stopwatch.Elapsed.TotalMilliseconds;
+                var delayTime = (int)Math.Max(500 - totalTime, 100);
 
-                var delayTime = (int)Math.Max(500 - totalTime,100);
+                _logger.Debug("[MAP LOOP] Mapa {MapId} processado em {Time}ms (Shops={ShopTime}ms, Tamer={TamerTime}ms, Mobs={MobTime}ms, Drops={DropTime}ms)",
+                    map.MapId,
+                    Math.Round(totalTime),
+                    Math.Round(shopStopwatch.Elapsed.TotalMilliseconds),
+                    Math.Round(tamerStopwatch.Elapsed.TotalMilliseconds),
+                    Math.Round(monsterStopwatch.Elapsed.TotalMilliseconds),
+                    Math.Round(dropsStopwatch.Elapsed.TotalMilliseconds));
+
                 await Task.Delay(delayTime);
             }
             catch (Exception ex)
@@ -341,35 +377,6 @@ namespace DigitalWorldOnline.GameHost
             client.Tamer.MobsInView.Clear();
             map.AddClient(client);
             client.Tamer.Revive();
-
-            // 🔹 Forçar reload de shops da DB sempre que um jogador entra no mapa
-            try
-            {
-                var consignedShops = _mapper.Map<List<ConsignedShop>>(
-                    _sender.Send(new ConsignedShopsQuery((int)map.Id)).Result
-                );
-
-                map.UpdateConsignedShops(consignedShops);
-
-                // 🔹 Enviar todas as shops já carregadas ao jogador
-                if (map.ConsignedShops.Any())
-                {
-                    foreach (var shop in map.ConsignedShops)
-                    {
-                        ShowConsignedShop(map, shop, client.Tamer.Id);
-                    }
-
-                    _logger.Information($"[SHOP DEBUG] {map.ConsignedShops.Count} shops enviadas ao {client.Tamer.Name} ao entrar no mapa {map.Id} (canal {map.Channel}).");
-                }
-                else
-                {
-                    _logger.Information($"[SHOP DEBUG] Nenhuma shop encontrada para enviar ao {client.Tamer.Name} no mapa {map.Id} (canal {map.Channel}).");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"[SHOP DEBUG] Erro ao carregar shops para {client.Tamer.Name} no mapa {map.Id}: {ex.Message}");
-            }
         }
 
         /// <summary>
@@ -524,7 +531,7 @@ namespace DigitalWorldOnline.GameHost
 
             return map?.MobsAttacking(tamerId) ?? false;
         }
-        public bool IMobsAttacking(short mapId,long tamerId)
+        public bool IMobsAttacking(short mapId, long tamerId)
         {
             var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
 
@@ -725,7 +732,7 @@ namespace DigitalWorldOnline.GameHost
 
             return targetMobs.DistinctBy(x => x.Id).ToList();
         }
-        public IMob GetNearestIMobToTarget(short mapId,int handler,int range,long tamerId)
+        public IMob GetNearestIMobToTarget(short mapId, int handler, int range, long tamerId)
         {
             var targetMap = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
 
@@ -740,10 +747,10 @@ namespace DigitalWorldOnline.GameHost
             var originX = originMob.CurrentLocation.X;
             var originY = originMob.CurrentLocation.Y;
 
-            return GetNearestIMob(targetMap.IMobs.Where(x => x.Alive).ToList(),originX,originY,range);
+            return GetNearestIMob(targetMap.IMobs.Where(x => x.Alive).ToList(), originX, originY, range);
         }
 
-        public static IMob GetNearestIMob(List<IMob> mobs,int originX,int originY,int range)
+        public static IMob GetNearestIMob(List<IMob> mobs, int originX, int originY, int range)
         {
             IMob nearestMob = null;
             double minDistance = double.MaxValue;
@@ -752,7 +759,7 @@ namespace DigitalWorldOnline.GameHost
             {
                 var mobX = mob.CurrentLocation.X;
                 var mobY = mob.CurrentLocation.Y;
-                var distance = CalculateDistance(originX,originY,mobX,mobY);
+                var distance = CalculateDistance(originX, originY, mobX, mobY);
 
                 if (distance <= range && distance < minDistance)
                 {
@@ -782,7 +789,7 @@ namespace DigitalWorldOnline.GameHost
 
             return targetMobs;
         }
-        public List<IMob> GetIMobsNearbyPartner(Location location,int range,long tamerId)
+        public List<IMob> GetIMobsNearbyPartner(Location location, int range, long tamerId)
         {
             var targetMap = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
 
@@ -792,11 +799,11 @@ namespace DigitalWorldOnline.GameHost
             var originX = location.X;
             var originY = location.Y;
 
-            return GetTargetIMobs(targetMap.IMobs.Where(x => x.Alive).ToList(),originX,originY,range)
+            return GetTargetIMobs(targetMap.IMobs.Where(x => x.Alive).ToList(), originX, originY, range)
                 .DistinctBy(x => x.Id).ToList();
         }
 
-        public List<IMob> GetIMobsNearbyTargetMob(short mapId,int handler,int range,long tamerId)
+        public List<IMob> GetIMobsNearbyTargetMob(short mapId, int handler, int range, long tamerId)
         {
             var targetMap = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
 
@@ -814,17 +821,17 @@ namespace DigitalWorldOnline.GameHost
             var targetMobs = new List<IMob>();
             targetMobs.Add(originMob);
 
-            targetMobs.AddRange(GetTargetIMobs(targetMap.IMobs.Where(x => x.Alive).ToList(),originX,originY,range));
+            targetMobs.AddRange(GetTargetIMobs(targetMap.IMobs.Where(x => x.Alive).ToList(), originX, originY, range));
 
             return targetMobs.DistinctBy(x => x.Id).ToList();
         }
-        public IMob? GetIMobByHandler(short mapId,int handler,long tamerId)
+        public IMob? GetIMobByHandler(short mapId, int handler, long tamerId)
         {
             var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
 
             return map?.IMobs.FirstOrDefault(x => x.GeneralHandler == handler);
         }
-        public static List<IMob> GetTargetIMobs(List<IMob> mobs,int originX,int originY,int range)
+        public static List<IMob> GetTargetIMobs(List<IMob> mobs, int originX, int originY, int range)
         {
             var targetMobs = new List<IMob>();
 
@@ -833,7 +840,7 @@ namespace DigitalWorldOnline.GameHost
                 var mobX = mob.CurrentLocation.X;
                 var mobY = mob.CurrentLocation.Y;
 
-                var distance = CalculateDistance(originX,originY,mobX,mobY);
+                var distance = CalculateDistance(originX, originY, mobX, mobY);
 
                 if (distance <= range)
                 {
@@ -842,16 +849,6 @@ namespace DigitalWorldOnline.GameHost
             }
 
             return targetMobs;
-        }
-
-        // ----------------------------------------------------------------------------
-
-        private static double CalculateDistance(int x1, int y1, int x2, int y2)
-        {
-            var deltaX = x2 - x1;
-            var deltaY = y2 - y1;
-
-            return Math.Sqrt(deltaX * deltaX + deltaY * deltaY);
         }
 
         // ----------------------------------------------------------------------------
@@ -865,6 +862,9 @@ namespace DigitalWorldOnline.GameHost
 
         public async Task CallDiscord(string message, GameClient tamer, string coloured, string local, string Channel = "1374551248061202632", bool custom = false)
         {
+            return;
+
+            // TODO: discord in the future in needed
             var payload = new
             {
                 message = message,
@@ -923,6 +923,51 @@ namespace DigitalWorldOnline.GameHost
 
                 var response = await client.SendAsync(request);
                 var responseString = await response.Content.ReadAsStringAsync();
+            }
+        }
+
+        // ----------------------------------------------------------------------------
+
+        private static double CalculateDistance(int x1, int y1, int x2, int y2)
+        {
+            var deltaX = x2 - x1;
+            var deltaY = y2 - y1;
+
+            return Math.Sqrt(deltaX * deltaX + deltaY * deltaY);
+        }
+
+        // ----------------------------------------------------------------------------
+
+        // Background loop that periodically syncs maps and map objects from the database.
+        private async Task SyncMapsAndObjectsLoop(CancellationToken cancellationToken)
+        {
+            try
+            {
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    try
+                    {
+                        // These methods already check internal timers to avoid frequent DB calls.
+                        await SearchNewMaps(cancellationToken);
+                        await GetMapObjects(cancellationToken);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // cancellation requested, break out cleanly
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Error(ex, "[SYNC LOOP] Error while syncing maps or map objects");
+                    }
+
+                    // Wait a bit before next sync to avoid tight loop; the called methods also control frequency
+                    try { await Task.Delay(1000, cancellationToken); } catch (OperationCanceledException) { break; }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error(ex, "[SYNC LOOP] Fatal error in background sync loop");
             }
         }
     }

@@ -68,7 +68,7 @@ namespace DigitalWorldOnline.Commons.Interfaces
 
         Task UpdateItemAsync(ItemModel item);
 
-        Task UpdateItemListSizeAsync(long itemListId, short newSize, CancellationToken ct = default);
+        Task UpdateItemListSizeAsync(long itemListId, byte newSize);
 
         Task AddInventorySlotsAsync(List<ItemModel> items);
 

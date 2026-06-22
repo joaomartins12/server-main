@@ -47,11 +47,19 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Character
         public async Task<DigimonDTO> AddDigimonAsync(DigimonModel digimon)
         {
             var tamerDto = await _context.Character
-                .Include(x => x.Digimons).ThenInclude(y => y.Digiclone).ThenInclude(z => z.History)
-                .Include(x => x.Digimons).ThenInclude(y => y.AttributeExperience)
-                .Include(x => x.Digimons).ThenInclude(y => y.Location)
-                .Include(x => x.Digimons).ThenInclude(y => y.BuffList).ThenInclude(z => z.Buffs)
-                .Include(x => x.Digimons).ThenInclude(y => y.Evolutions).ThenInclude(z => z.Skills)
+                .Include(x => x.Digimons)
+                .ThenInclude(y => y.Digiclone)
+                .ThenInclude(z => z.History)
+                .Include(x => x.Digimons)
+                .ThenInclude(y => y.AttributeExperience)
+                .Include(x => x.Digimons)
+                .ThenInclude(y => y.Location)
+                .Include(x => x.Digimons)
+                .ThenInclude(y => y.BuffList)
+                .ThenInclude(z => z.Buffs)
+                .Include(x => x.Digimons)
+                .ThenInclude(y => y.Evolutions)
+                .ThenInclude(z => z.Skills)
                 .SingleOrDefaultAsync(x => x.Id == digimon.CharacterId);
 
             try
@@ -63,19 +71,11 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Character
                     var existing = tamerDto.Digimons.FirstOrDefault(d => d.Id == dto.Id);
                     if (existing != null)
                     {
-                        // Atualiza campos do existente (sem recriar a coleção)
-                        _mapper.Map(digimon, existing);
-                        _context.Digimon.Update(existing);
+                        _mapper.Map(digimon, existing); // atualiza ao invés de duplicar
                     }
                     else
                     {
-                        // 🔹 Garante vínculo mesmo que CharacterId do digimon venha nulo
-                        dto.CharacterId = digimon.CharacterId ?? tamerDto.Id;
-
-                        await _context.Digimon.AddAsync(dto);
-
-                        // (Opcional) mantém a navegação também
-                        tamerDto.Digimons.Add(dto);
+                        tamerDto.Digimons.Add(dto); // adiciona se for novo
                     }
 
                     await _context.SaveChangesAsync();
@@ -89,33 +89,31 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Character
                 throw;
             }
         }
-
         public async Task<CharacterFriendDTO> AddFriendAsync(CharacterFriendModel friend)
         {
+            // 🔹 remove AsNoTracking
             var tamerDto = await _context.Character
-                .AsNoTrackingWithIdentityResolution()
                 .Include(x => x.Friends)
-                .SingleOrDefaultAsync(x => x.Id == friend.CharacterId)
-                .ConfigureAwait(false);
+                .SingleOrDefaultAsync(x => x.Id == friend.CharacterId);
 
-            if (tamerDto == null) return null;
+            if (tamerDto == null)
+                return null;
 
             var dto = _mapper.Map<CharacterFriendDTO>(friend);
+
+            // 🔹 apenas adiciona à coleção — o EF já está a rastrear
             tamerDto.Friends.Add(dto);
 
-            _context.Update(tamerDto);
-            await _context.SaveChangesAsync().ConfigureAwait(false);
-
+            await _context.SaveChangesAsync(); // sem necessidade de _context.Update
             return dto;
         }
 
-        public async Task<DeleteCharacterResultEnum> DeleteCharacterByAccountAndPositionAsync(
-            long accountId, byte characterPosition)
+        public async Task<DeleteCharacterResultEnum> DeleteCharacterByAccountAndPositionAsync(long accountId, byte characterPosition)
         {
             try
             {
                 var dto = await _context.Character
-                    .AsNoTrackingWithIdentityResolution()
+                    .AsNoTracking() // ✅ permitido aqui
                     .AsSplitQuery()
                     .Include(x => x.Incubator)
                     .Include(x => x.Location)
@@ -127,21 +125,30 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Character
                     .Include(x => x.ConsignedShop)
                     .Include(x => x.MapRegions)
                     .Include(x => x.Points)
-                    .Include(x => x.BuffList).ThenInclude(y => y.Buffs)
-                    .Include(x => x.SealList).ThenInclude(y => y.Seals)
-                    .Include(x => x.ItemList).ThenInclude(y => y.Items)
-                    .Include(x => x.Digimons).ThenInclude(y => y.Digiclone)
-                    .Include(x => x.Digimons).ThenInclude(y => y.AttributeExperience)
-                    .Include(x => x.Digimons).ThenInclude(y => y.Location)
-                    .Include(x => x.Digimons).ThenInclude(y => y.BuffList).ThenInclude(z => z.Buffs)
-                    .Include(x => x.Digimons).ThenInclude(z => z.Evolutions)
-                    .SingleOrDefaultAsync(x => x.AccountId == accountId && x.Position == characterPosition)
-                    .ConfigureAwait(false);
+                    .Include(x => x.BuffList)
+                        .ThenInclude(y => y.Buffs)
+                    .Include(x => x.SealList)
+                        .ThenInclude(y => y.Seals)
+                    .Include(x => x.ItemList)
+                        .ThenInclude(y => y.Items)
+                    .Include(x => x.Digimons)
+                        .ThenInclude(y => y.Digiclone)
+                    .Include(x => x.Digimons)
+                        .ThenInclude(y => y.AttributeExperience)
+                    .Include(x => x.Digimons)
+                        .ThenInclude(y => y.Location)
+                    .Include(x => x.Digimons)
+                        .ThenInclude(y => y.BuffList)
+                        .ThenInclude(z => z.Buffs)
+                    .Include(x => x.Digimons)
+                        .ThenInclude(z => z.Evolutions)
+                    .SingleOrDefaultAsync(x => x.AccountId == accountId &&
+                                               x.Position == characterPosition);
 
                 if (dto != null)
                 {
                     _context.Remove(dto);
-                    await _context.SaveChangesAsync().ConfigureAwait(false);
+                    await _context.SaveChangesAsync();
                 }
 
                 return DeleteCharacterResultEnum.Deleted;
@@ -154,21 +161,19 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Character
 
         public async Task UpdateCharacterChannelByIdAsync(long characterId, byte channel)
         {
-            var character = await _context.Character
-                .FirstOrDefaultAsync(x => x.Id == characterId)
-                .ConfigureAwait(false);
+            var character = await _context.Character.FirstOrDefaultAsync(x => x.Id == characterId);
 
             if (character == null) return;
 
             character.Channel = channel;
 
             _context.Character.Update(character);
-            await _context.SaveChangesAsync().ConfigureAwait(false);
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateCharacterLocationAsync(CharacterLocationModel location)
         {
-            var dto = await _context.CharacterLocation.FindAsync(location.Id).ConfigureAwait(false);
+            var dto = await _context.CharacterLocation.FindAsync(location.Id);
 
             if (dto == null) return;
 
@@ -178,12 +183,12 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Character
             dto.Z = location.Z;
 
             _context.CharacterLocation.Update(dto);
-            await _context.SaveChangesAsync().ConfigureAwait(false);
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateDigimonLocationAsync(DigimonLocationModel location)
         {
-            var dto = await _context.DigimonLocation.FindAsync(location.Id).ConfigureAwait(false);
+            var dto = await _context.DigimonLocation.FindAsync(location.Id);
 
             if (dto == null) return;
 
@@ -193,80 +198,68 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Character
             dto.Z = location.Z;
 
             _context.DigimonLocation.Update(dto);
-            await _context.SaveChangesAsync().ConfigureAwait(false);
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateCharacterResourcesAsync(CharacterModel tamer)
         {
+            // ❌ Remover AsNoTracking
             var tamerDto = await _context.Character
                 .Include(x => x.Digimons)
                 .FirstOrDefaultAsync(x => x.Id == tamer.Id);
 
-            if (tamerDto == null) return;
+            if (tamerDto == null)
+                return;
 
+            // 🔹 Atualiza apenas os campos necessários
             tamerDto.CurrentHp = tamer.CurrentHp;
             tamerDto.CurrentDs = tamer.CurrentDs;
 
+            // 🔹 Atualiza HP/DS dos Digimons se houver
             if (tamer.Digimons?.Any() == true)
             {
-                // Atualiza apenas os digimons presentes no payload, sem substituir a coleção
-                foreach (var dModel in tamer.Digimons)
+                foreach (var digimon in tamerDto.Digimons)
                 {
-                    var dDto = tamerDto.Digimons.FirstOrDefault(x => x.Id == dModel.Id);
-                    if (dDto != null)
+                    var source = tamer.Digimons.FirstOrDefault(d => d.Id == digimon.Id);
+                    if (source != null)
                     {
-                        dDto.CurrentHp = dModel.CurrentHp;
-                        dDto.CurrentDs = dModel.CurrentDs;
-
-                        // Se o cliente enviar CurrentType durante o tick, atualiza também
-                        if (!Equals(dModel.CurrentType, default(int))) // ajuste se for enum/nullable
-                            dDto.CurrentType = dModel.CurrentType;
-
-                        _context.Digimon.Update(dDto);
+                        digimon.CurrentHp = source.CurrentHp;
+                        digimon.CurrentDs = source.CurrentDs;
                     }
                 }
             }
 
-            // ⚠️ Não usar _context.Update(tamerDto) aqui para não mexer na coleção; os objetos já estão tracked
             await _context.SaveChangesAsync();
         }
 
         public async Task UpdateCharactersStateAsync(CharacterStateEnum state)
         {
-            var characters = await _context.Character
-                .AsNoTrackingWithIdentityResolution()
-                .ToListAsync()
-                .ConfigureAwait(false);
+            var characters = await _context.Character.ToListAsync(); // ✅ sem AsNoTracking()
 
-            characters.ForEach(character =>
+            foreach (var character in characters)
             {
                 character.State = state;
                 character.EventState = CharacterEventStateEnum.None;
-            });
+            }
 
-            _context.Character.UpdateRange(characters);
-            await _context.SaveChangesAsync().ConfigureAwait(false);
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateCharacterStateByIdAsync(long characterId, CharacterStateEnum state)
         {
-            var character = await _context.Character
-                .AsNoTrackingWithIdentityResolution()
-                .FirstOrDefaultAsync(x => x.Id == characterId)
-                .ConfigureAwait(false);
+            var character = await _context.Character.FirstOrDefaultAsync(x => x.Id == characterId); // ✅ sem AsNoTracking
 
-            if (character != null)
-            {
-                character.State = state;
+            if (character == null)
+                return;
 
-                _context.Character.Update(character);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            character.State = state;
+
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateCharacterExperienceAsync(long tamerId, long currentExperience, byte level)
         {
-            var dto = await _context.Character.FindAsync(tamerId).ConfigureAwait(false);
+            var dto = await _context.Character.FindAsync(tamerId);
 
             if (dto == null) return;
 
@@ -274,65 +267,74 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Character
             dto.Level = level;
 
             _context.Character.Update(dto);
-            await _context.SaveChangesAsync().ConfigureAwait(false);
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateDigimonExperienceAsync(DigimonModel digimon)
         {
+            // ❌ Remover AsNoTracking
             var dto = await _context.Digimon
-                .AsNoTrackingWithIdentityResolution()
                 .Include(x => x.Evolutions)
                 .Include(x => x.AttributeExperience)
-                .FirstOrDefaultAsync(x => x.Id == digimon.Id)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == digimon.Id);
 
-            if (dto == null) return;
+            if (dto == null)
+                return;
 
+            // 🔹 Atualiza os valores principais
             dto.CurrentExperience = digimon.CurrentExperience;
             dto.CurrentSkillExperience = digimon.CurrentSkillExperience;
             dto.TranscendenceExperience = digimon.TranscendenceExperience;
             dto.Level = digimon.Level;
 
-            var attributeExperience = digimon.AttributeExperience;
-            var dtoAttributeExperience = dto.AttributeExperience;
+            // 🔹 Atualiza AttributeExperience
+            var attrSrc = digimon.AttributeExperience;
+            var attrDst = dto.AttributeExperience;
 
-            dtoAttributeExperience.Data = attributeExperience.Data;
-            dtoAttributeExperience.Vaccine = attributeExperience.Vaccine;
-            dtoAttributeExperience.Virus = attributeExperience.Virus;
-            dtoAttributeExperience.Ice = attributeExperience.Ice;
-            dtoAttributeExperience.Water = attributeExperience.Water;
-            dtoAttributeExperience.Fire = attributeExperience.Fire;
-            dtoAttributeExperience.Land = attributeExperience.Land;
-            dtoAttributeExperience.Wind = attributeExperience.Wind;
-            dtoAttributeExperience.Wood = attributeExperience.Wood;
-            dtoAttributeExperience.Light = attributeExperience.Light;
-            dtoAttributeExperience.Dark = attributeExperience.Dark;
-            dtoAttributeExperience.Thunder = attributeExperience.Thunder;
-            dtoAttributeExperience.Steel = attributeExperience.Steel;
-
-            foreach (var evolutionDto in dto.Evolutions)
+            if (attrSrc != null && attrDst != null)
             {
-                var evolutionModel = digimon.Evolutions.FirstOrDefault(x => x.Id == evolutionDto.Id);
-                if (evolutionModel == null) continue;
-
-                evolutionDto.Type = evolutionModel.Type;
-                evolutionDto.Unlocked = evolutionModel.Unlocked;
-                evolutionDto.SkillPoints = evolutionModel.SkillPoints;
-                evolutionDto.SkillMastery = evolutionModel.SkillMastery;
-                evolutionDto.SkillExperience = evolutionModel.SkillExperience;
+                attrDst.Data = attrSrc.Data;
+                attrDst.Vaccine = attrSrc.Vaccine;
+                attrDst.Virus = attrSrc.Virus;
+                attrDst.Ice = attrSrc.Ice;
+                attrDst.Water = attrSrc.Water;
+                attrDst.Fire = attrSrc.Fire;
+                attrDst.Land = attrSrc.Land;
+                attrDst.Wind = attrSrc.Wind;
+                attrDst.Wood = attrSrc.Wood;
+                attrDst.Light = attrSrc.Light;
+                attrDst.Dark = attrSrc.Dark;
+                attrDst.Thunder = attrSrc.Thunder;
+                attrDst.Steel = attrSrc.Steel;
             }
 
-            _context.Update(dto);
-            await _context.SaveChangesAsync().ConfigureAwait(false);
+            // 🔹 Atualiza Evoluções
+            if (digimon.Evolutions?.Any() == true)
+            {
+                foreach (var evo in dto.Evolutions)
+                {
+                    var srcEvo = digimon.Evolutions.FirstOrDefault(x => x.Id == evo.Id);
+                    if (srcEvo == null)
+                        continue;
+
+                    evo.Type = srcEvo.Type;
+                    evo.Unlocked = srcEvo.Unlocked;
+                    evo.SkillPoints = srcEvo.SkillPoints;
+                    evo.SkillMastery = srcEvo.SkillMastery;
+                    evo.SkillExperience = srcEvo.SkillExperience;
+                }
+            }
+
+            // ✅ Sem Update(dto)
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateCharacterSealsAsync(CharacterSealListModel sealList)
         {
             var dto = await _context.CharacterSealList
-                .AsNoTrackingWithIdentityResolution()
+                .AsNoTracking()
                 .Include(x => x.Seals)
-                .FirstOrDefaultAsync(x => x.Id == sealList.Id)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == sealList.Id);
 
             if (dto != null)
             {
@@ -359,7 +361,7 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Character
                 }
 
                 _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
+                _context.SaveChanges();
             }
         }
 
@@ -369,97 +371,89 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Character
             if (dto != null)
             {
                 _context.Add(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
+                await _context.SaveChangesAsync();
             }
         }
 
         public async Task UpdatePartnerCurrentTypeAsync(DigimonModel digimon)
         {
-            var dto = await _context.Digimon
-                .AsNoTrackingWithIdentityResolution()
-                .FirstOrDefaultAsync(x => x.Id == digimon.Id)
-                .ConfigureAwait(false);
+            var dto = await _context.Digimon.FirstOrDefaultAsync(x => x.Id == digimon.Id);
 
-            if (dto != null)
-            {
-                dto.CurrentType = digimon.CurrentType;
+            if (dto == null)
+                return;
 
-                _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            dto.CurrentType = digimon.CurrentType;
+
+            // O EF já rastreia a entidade, então só salvar
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateDigicloneAsync(DigimonDigicloneModel digiclone)
         {
             var dto = await _context.DigimonDigiclone
-                .AsNoTrackingWithIdentityResolution()
                 .Include(x => x.History)
-                .FirstOrDefaultAsync(x => x.Id == digiclone.Id || x.DigimonId == digiclone.DigimonId)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == digiclone.Id || x.DigimonId == digiclone.DigimonId);
 
-            if (dto != null)
+            if (dto == null)
+                return;
+
+            dto.ATLevel = digiclone.ATLevel;
+            dto.BLLevel = digiclone.BLLevel;
+            dto.CTLevel = digiclone.CTLevel;
+            dto.EVLevel = digiclone.EVLevel;
+            dto.HPLevel = digiclone.HPLevel;
+
+            dto.ATValue = digiclone.ATValue;
+            dto.BLValue = digiclone.BLValue;
+            dto.CTValue = digiclone.CTValue;
+            dto.EVValue = digiclone.EVValue;
+            dto.HPValue = digiclone.HPValue;
+
+            if (dto.History != null && digiclone.History != null)
             {
-                dto.ATLevel = digiclone.ATLevel;
-                dto.BLLevel = digiclone.BLLevel;
-                dto.CTLevel = digiclone.CTLevel;
-                dto.EVLevel = digiclone.EVLevel;
-                dto.HPLevel = digiclone.HPLevel;
-
-                dto.ATValue = digiclone.ATValue;
-                dto.BLValue = digiclone.BLValue;
-                dto.CTValue = digiclone.CTValue;
-                dto.EVValue = digiclone.EVValue;
-                dto.HPValue = digiclone.HPValue;
-
                 dto.History.ATValues = digiclone.History.ATValues;
                 dto.History.BLValues = digiclone.History.BLValues;
                 dto.History.CTValues = digiclone.History.CTValues;
                 dto.History.EVValues = digiclone.History.EVValues;
                 dto.History.HPValues = digiclone.History.HPValues;
-
-                _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
             }
+
+            // O EF já está a rastrear tudo
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateCharacterTitleByIdAsync(long characterId, short titleId)
         {
-            var dto = await _context.Character
-                .AsNoTrackingWithIdentityResolution()
-                .FirstOrDefaultAsync(x => x.Id == characterId)
-                .ConfigureAwait(false);
+            var dto = await _context.Character.FirstOrDefaultAsync(x => x.Id == characterId);
 
-            if (dto != null)
-            {
-                dto.CurrentTitle = titleId;
+            if (dto == null)
+                return;
 
-                _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            dto.CurrentTitle = titleId;
+
+            // Não precisa de _context.Update(dto), o EF já está a rastrear
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateCharacterProgressCompleteAsync(CharacterProgressModel progress)
         {
-            var dto = await _context.CharacterProgress
-                .AsNoTrackingWithIdentityResolution()
-                .FirstOrDefaultAsync(x => x.Id == progress.Id)
-                .ConfigureAwait(false);
+            var dto = await _context.CharacterProgress.FirstOrDefaultAsync(x => x.Id == progress.Id);
 
-            if (dto != null)
-            {
-                dto.CompletedData = progress.CompletedData;
-                dto.CompletedDataValue = progress.CompletedDataValue;
+            if (dto == null)
+                return;
 
-                _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            dto.CompletedData = progress.CompletedData;
+            dto.CompletedDataValue = progress.CompletedDataValue;
+
+            // EF rastreia a entidade automaticamente
+            await _context.SaveChangesAsync();
         }
+
         public async Task UpdateCharacterBuffListAsync(CharacterBuffListModel buffList)
         {
             var dto = await _context.CharacterBuffList
                 .Include(x => x.Buffs)
-                .FirstOrDefaultAsync(x => x.Id == buffList.Id)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == buffList.Id);
 
             if (dto == null)
                 return;
@@ -482,7 +476,7 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Character
                     existingBuff.EndDate = buff.EndDate;
                     existingBuff.SkillId = buff.SkillId;
                     existingBuff.TypeN = buff.TypeN;
-                    _context.Update(existingBuff);
+                    _context.Update(existingBuff); // Opcional, pois é rastreado
                 }
                 else
                 {
@@ -495,64 +489,73 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Character
 
             try
             {
-                await _context.SaveChangesAsync().ConfigureAwait(false);
+                await _context.SaveChangesAsync();
             }
             catch (DbUpdateConcurrencyException ex)
             {
+                // 🔁 Silenciar ou logar conforme necessidade
                 Console.WriteLine($"[WARN] Concurrency conflict on buffs update: {ex.Message}");
+                // Você pode ignorar, logar, ou tomar outras ações como re-tentar.
             }
         }
 
         public async Task UpdateDigimonBuffListAsync(DigimonBuffListModel buffList)
         {
+            // ❌ Removido AsNoTracking — causava erros de concorrência e tracking incorreto
             var dto = await _context.DigimonBuffList
-                .AsNoTrackingWithIdentityResolution()
                 .Include(x => x.Buffs)
-                .FirstOrDefaultAsync(x => x.Id == buffList.Id)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == buffList.Id);
 
-            if (dto != null)
+            if (dto == null)
+                return;
+
+            // 🔹 Remove buffs que não existem mais
+            var buffsToRemove = dto.Buffs
+                .Where(dtoBuff => !buffList.Buffs.Any(buff => buff.Id == dtoBuff.Id))
+                .ToList();
+
+            if (buffsToRemove.Count > 0)
             {
-                var buffsToRemove = dto.Buffs
-                    .Where(dtoBuff => !buffList.Buffs.Any(buff => buff.Id == dtoBuff.Id))
-                    .ToList();
+                _context.RemoveRange(buffsToRemove);
+            }
 
-                foreach (var buffToRemove in buffsToRemove)
-                {
-                    dto.Buffs.Remove(buffToRemove);
-                    _context.Remove(buffToRemove);
-                    await _context.SaveChangesAsync().ConfigureAwait(false);
-                }
+            // 🔹 Atualiza ou adiciona novos buffs
+            foreach (var buff in buffList.Buffs)
+            {
+                var dtoBuff = dto.Buffs.FirstOrDefault(b => b.Id == buff.Id);
 
-                foreach (var buff in buffList.Buffs)
+                if (dtoBuff != null)
                 {
-                    var dtoBuff = dto.Buffs.FirstOrDefault(x => x.Id == buff.Id);
-                    if (dtoBuff != null)
-                    {
-                        dtoBuff.Duration = buff.Duration;
-                        dtoBuff.EndDate = buff.EndDate;
-                        dtoBuff.SkillId = buff.SkillId;
-                        dtoBuff.TypeN = buff.TypeN;
-                        dtoBuff.CoolEndDate = buff.CoolEndDate;
-                        dtoBuff.Cooldown = buff.Cooldown;
-                        _context.Update(dtoBuff);
-                        await _context.SaveChangesAsync().ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        dtoBuff = _mapper.Map<DigimonBuffDTO>(buff);
-                        dtoBuff.BuffListId = buffList.Id;
-                        dto.Buffs.Add(dtoBuff);
-                        _context.Add(dtoBuff);
-                        await _context.SaveChangesAsync().ConfigureAwait(false);
-                    }
+                    dtoBuff.Duration = buff.Duration;
+                    dtoBuff.EndDate = buff.EndDate;
+                    dtoBuff.SkillId = buff.SkillId;
+                    dtoBuff.TypeN = buff.TypeN;
+                    dtoBuff.CoolEndDate = buff.CoolEndDate;
+                    dtoBuff.Cooldown = buff.Cooldown;
                 }
+                else
+                {
+                    var newBuff = _mapper.Map<DigimonBuffDTO>(buff);
+                    newBuff.BuffListId = buffList.Id;
+                    dto.Buffs.Add(newBuff);
+                    _context.Add(newBuff);
+                }
+            }
+
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                // ⚠️ Ocorre se outro processo alterou os buffs simultaneamente
+                Console.WriteLine($"[WARN] Concurrency conflict on DigimonBuffList update: {ex.Message}");
             }
         }
 
         public async Task UpdateCharacterActiveEvolutionAsync(CharacterActiveEvolutionModel activeEvolution)
         {
-            var dto = await _context.CharacterActiveEvolution.FindAsync(activeEvolution.Id).ConfigureAwait(false);
+            var dto = await _context.CharacterActiveEvolution.FindAsync(activeEvolution.Id);
 
             if (dto == null) return;
 
@@ -560,61 +563,59 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Character
             dto.DsPerSecond = activeEvolution.DsPerSecond;
 
             _context.CharacterActiveEvolution.Update(dto);
-            await _context.SaveChangesAsync().ConfigureAwait(false);
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateCharacterBasicInfoAsync(CharacterModel character)
         {
             var dto = await _context.Character
-                .AsNoTrackingWithIdentityResolution()
                 .Include(x => x.Digimons)
-                .SingleOrDefaultAsync(x => x.Id == character.Id)
-                .ConfigureAwait(false);
+                .SingleOrDefaultAsync(x => x.Id == character.Id);
 
-            if (dto != null)
+            if (dto == null)
+                return;
+
+            // 🔹 Atualiza apenas os campos necessários
+            dto.CurrentHp = character.CurrentHp;
+            dto.CurrentDs = character.CurrentDs;
+            dto.XGauge = character.XGauge;
+            dto.XCrystals = character.XCrystals;
+
+            // 🔹 Atualiza os Digimons relacionados
+            foreach (var digimonDto in dto.Digimons)
             {
-                dto.CurrentHp = character.CurrentHp;
-                dto.CurrentDs = character.CurrentDs;
-                dto.XGauge = character.XGauge;
-                dto.XCrystals = character.XCrystals;
-
-                foreach (var digimonDto in dto.Digimons)
+                var digimonModel = character.Digimons.FirstOrDefault(x => x.Id == digimonDto.Id);
+                if (digimonModel != null)
                 {
-                    var digimonModel = character.Digimons
-                        .FirstOrDefault(x => x.Id == digimonDto.Id);
-
-                    if (digimonModel != null)
-                    {
-                        digimonDto.CurrentHp = digimonModel.CurrentHp;
-                        digimonDto.CurrentDs = digimonModel.CurrentDs;
-                        digimonDto.CurrentType = digimonModel.CurrentType;
-                    }
+                    digimonDto.CurrentHp = digimonModel.CurrentHp;
+                    digimonDto.CurrentDs = digimonModel.CurrentDs;
+                    digimonDto.CurrentType = digimonModel.CurrentType;
                 }
-
-                _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
             }
+
+            // 🔹 Apenas salva as alterações rastreadas (sem reattach)
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateItemListBitsAsync(long itemListId, long bits)
         {
-            var dto = await _context.ItemLists
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.Id == itemListId)
-                .ConfigureAwait(false);
+            var dto = await _context.ItemLists.FirstOrDefaultAsync(x => x.Id == itemListId);
 
-            if (dto != null)
-            {
-                dto.Bits = bits;
-                _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            if (dto == null)
+                return;
+
+            // Atualiza apenas o campo necessário
+            dto.Bits = bits;
+
+            // O EF Core já rastreia a entidade, então basta salvar
+            await _context.SaveChangesAsync();
         }
+
         public async Task UpdateItemsAsync(List<ItemModel> items)
         {
-            await RemoveDeletedItems(items).ConfigureAwait(false);
-            await AddOrUpdateItems(items).ConfigureAwait(false);
-            await _context.SaveChangesAsync().ConfigureAwait(false);
+            await RemoveDeletedItems(items);
+            await AddOrUpdateItems(items);
+            await _context.SaveChangesAsync();
         }
 
         private async Task AddOrUpdateItems(List<ItemModel> items)
@@ -626,8 +627,7 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Character
                 var dto = await _context.Items
                     .Include(x => x.AccessoryStatus)
                     .Include(x => x.SocketStatus)
-                    .FirstOrDefaultAsync(x => x.Id == item.Id)
-                    .ConfigureAwait(false);
+                    .FirstOrDefaultAsync(x => x.Id == item.Id);
 
                 if (dto != null)
                 {
@@ -643,137 +643,98 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Character
                     dto.Power = item.Power;
                     dto.TamerShopSellPrice = item.TamerShopSellPrice;
 
-                    // Proteções: só mapeia status se existirem do lado do model
-                    if (item.AccessoryStatus != null && dto.AccessoryStatus != null)
+                    foreach (var dtoStatus in dto.AccessoryStatus)
                     {
-                        foreach (var dtoStatus in dto.AccessoryStatus)
-                        {
-                            var modelStatus = item.AccessoryStatus.FirstOrDefault(x => x.Slot == dtoStatus.Slot);
-                            if (modelStatus != null)
-                            {
-                                dtoStatus.Type = modelStatus.Type;
-                                dtoStatus.Value = modelStatus.Value;
-                            }
-                        }
+                        var modelStatus = item.AccessoryStatus.First(x => x.Slot == dtoStatus.Slot);
+                        dtoStatus.Type = modelStatus.Type;
+                        dtoStatus.Value = modelStatus.Value;
                     }
 
-                    if (item.SocketStatus != null && dto.SocketStatus != null)
+                    foreach (var dtoStatus in dto.SocketStatus)
                     {
-                        foreach (var dtoStatus in dto.SocketStatus)
-                        {
-                            var modelStatus = item.SocketStatus.FirstOrDefault(x => x.Slot == dtoStatus.Slot);
-                            if (modelStatus != null)
-                            {
-                                dtoStatus.Type = modelStatus.Type;
-                                dtoStatus.AttributeId = modelStatus.AttributeId;
-                                dtoStatus.Value = modelStatus.Value;
-                            }
-                        }
+                        var modelStatus = item.SocketStatus.First(x => x.Slot == dtoStatus.Slot);
+                        dtoStatus.Type = modelStatus.Type;
+                        dtoStatus.AttributeId = modelStatus.AttributeId;
+                        dtoStatus.Value = modelStatus.Value;
                     }
                 }
                 else
                 {
-                    await _context.AddAsync(_mapper.Map<ItemDTO>(item)).ConfigureAwait(false);
+                    await _context.AddAsync(_mapper.Map<ItemDTO>(item));
                 }
             }
         }
+
+
         private async Task RemoveDeletedItems(List<ItemModel> items)
         {
             if (!items.Any())
                 return;
 
             var itemListId = items.First().ItemListId;
+            var existingIds = items.Select(x => x.Id).ToList();
 
-            // Se todos os itens recebidos são "novos" (Id == Guid.Empty),
-            // interpretamos como DELTA de adição e NÃO removemos nada
-            var looksLikeAddDeltaOnly = items.All(i => i.Id == Guid.Empty);
-            if (looksLikeAddDeltaOnly)
-                return;
-
-            var existing = await _context.Items
-                .AsNoTracking()
-                .Where(x => x.ItemListId == itemListId)
-                .ToListAsync()
-                .ConfigureAwait(false);
-
-            // Considera apenas IDs válidos vindos do model
-            var incomingIds = items.Where(i => i.Id != Guid.Empty).Select(i => i.Id).ToHashSet();
-
-            // Remover apenas os que claramente não estão mais na lista recebida
-            var toRemove = existing.Where(x => x.Id != Guid.Empty && !incomingIds.Contains(x.Id)).ToList();
-
-            foreach (var rem in toRemove)
-                _context.Remove(rem);
+            // Remove diretamente no SQL (sem carregar entidades)
+            await _context.Items
+                .Where(x => x.ItemListId == itemListId && !existingIds.Contains(x.Id))
+                .ExecuteDeleteAsync();
         }
 
         public async Task UpdateItemAccessoryStatusAsync(ItemModel item)
         {
             var dto = await _context.Items
-                .AsNoTracking()
                 .Include(x => x.AccessoryStatus)
-                .FirstOrDefaultAsync(x => x.Id == item.Id)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == item.Id);
 
-            if (dto != null)
+            if (dto == null)
+                return;
+
+            dto.RerollLeft = item.RerollLeft;
+            dto.Power = item.Power;
+
+            foreach (var dtoStatus in dto.AccessoryStatus)
             {
-                dto.RerollLeft = item.RerollLeft;
-                dto.Power = item.Power;
+                var modelStatus = item.AccessoryStatus.FirstOrDefault(x => x.Slot == dtoStatus.Slot);
+                if (modelStatus == null) continue;
 
-                if (item.AccessoryStatus != null && dto.AccessoryStatus != null)
-                {
-                    foreach (var dtoStatus in dto.AccessoryStatus)
-                    {
-                        var modelStatus = item.AccessoryStatus.FirstOrDefault(x => x.Slot == dtoStatus.Slot);
-                        if (modelStatus != null)
-                        {
-                            dtoStatus.Type = modelStatus.Type;
-                            dtoStatus.Value = modelStatus.Value;
-                        }
-                    }
-                }
-
-                _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
+                dtoStatus.Type = modelStatus.Type;
+                dtoStatus.Value = modelStatus.Value;
             }
+
+            await _context.SaveChangesAsync();
         }
+
         public async Task UpdateItemSocketStatusAsync(ItemModel item)
         {
             var dto = await _context.Items
-                .AsNoTracking()
                 .Include(x => x.SocketStatus)
-                .FirstOrDefaultAsync(x => x.Id == item.Id)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == item.Id);
 
-            if (dto != null)
+            if (dto == null)
+                return;
+
+            dto.RerollLeft = item.RerollLeft;
+            dto.Power = item.Power;
+
+            foreach (var dtoStatus in dto.SocketStatus)
             {
-                dto.RerollLeft = item.RerollLeft;
-                dto.Power = item.Power;
+                var modelStatus = item.SocketStatus.FirstOrDefault(x => x.Slot == dtoStatus.Slot);
+                if (modelStatus == null) continue;
 
-                if (item.SocketStatus != null && dto.SocketStatus != null)
-                {
-                    foreach (var dtoStatus in dto.SocketStatus)
-                    {
-                        var modelStatus = item.SocketStatus.FirstOrDefault(x => x.Slot == dtoStatus.Slot);
-                        if (modelStatus != null)
-                        {
-                            dtoStatus.Type = modelStatus.Type;
-                            dtoStatus.AttributeId = modelStatus.AttributeId;
-                            dtoStatus.Value = modelStatus.Value;
-                        }
-                    }
-                }
-
-                _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
+                dtoStatus.Type = modelStatus.Type;
+                dtoStatus.AttributeId = modelStatus.AttributeId;
+                dtoStatus.Value = modelStatus.Value;
             }
+
+            await _context.SaveChangesAsync();
         }
+
         public async Task UpdateItemAsync(ItemModel item)
         {
             var dto = await _context.Items
                 .Include(x => x.AccessoryStatus)
                 .Include(x => x.SocketStatus)
-                .FirstOrDefaultAsync(x => x.Id == item.Id)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == item.Id);
 
             if (dto != null)
             {
@@ -787,200 +748,173 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Character
                 dto.Power = item.Power;
                 dto.TamerShopSellPrice = item.TamerShopSellPrice;
 
-                if (item.AccessoryStatus != null && dto.AccessoryStatus != null)
+                foreach (var dtoStatus in dto.AccessoryStatus)
                 {
-                    foreach (var dtoStatus in dto.AccessoryStatus)
-                    {
-                        var modelStatus = item.AccessoryStatus.FirstOrDefault(x => x.Slot == dtoStatus.Slot);
-                        if (modelStatus != null)
-                        {
-                            dtoStatus.Type = modelStatus.Type;
-                            dtoStatus.Value = modelStatus.Value;
-                        }
-                    }
+                    var modelStatus = item.AccessoryStatus.First(x => x.Slot == dtoStatus.Slot);
+                    dtoStatus.Type = modelStatus.Type;
+                    dtoStatus.Value = modelStatus.Value;
                 }
 
-                if (item.SocketStatus != null && dto.SocketStatus != null)
+                foreach (var dtoStatus in dto.SocketStatus)
                 {
-                    foreach (var dtoStatus in dto.SocketStatus)
-                    {
-                        var modelStatus = item.SocketStatus.FirstOrDefault(x => x.Slot == dtoStatus.Slot);
-                        if (modelStatus != null)
-                        {
-                            dtoStatus.Type = modelStatus.Type;
-                            dtoStatus.AttributeId = modelStatus.AttributeId;
-                            dtoStatus.Value = modelStatus.Value;
-                        }
-                    }
+                    var modelStatus = item.SocketStatus.First(x => x.Slot == dtoStatus.Slot);
+                    dtoStatus.Type = modelStatus.Type;
+                    dtoStatus.AttributeId = modelStatus.AttributeId;
+                    dtoStatus.Value = modelStatus.Value;
                 }
 
-                await _context.SaveChangesAsync().ConfigureAwait(false);
+                await _context.SaveChangesAsync();
             }
         }
-        public async Task UpdateItemListSizeAsync(long itemListId, short newSize, CancellationToken ct = default)
+
+        public async Task UpdateItemListSizeAsync(long itemListId, byte newSize)
         {
-            var dto = await _context.ItemLists
-                .FirstOrDefaultAsync(x => x.Id == itemListId, ct)
-                .ConfigureAwait(false);
+            var dto = await _context.ItemLists.FirstOrDefaultAsync(x => x.Id == itemListId);
 
             if (dto != null)
             {
-                // ⚠️ O cliente espera 0–255. Garantimos que não passa de byte.
-                dto.Size = (byte)Math.Clamp(newSize, (short)0, (short)255);
+                dto.Size = newSize;
 
                 _context.Update(dto);
-                await _context.SaveChangesAsync(ct).ConfigureAwait(false);
+                await _context.SaveChangesAsync();
             }
         }
 
         public async Task AddInventorySlotsAsync(List<ItemModel> items)
         {
+            if (items == null || items.Count == 0)
+                return;
+
+            var itemListId = items.First().ItemListId;
+
+            // 🔹 Busca rastreada (sem AsNoTracking)
             var itemListDto = await _context.ItemLists
-                .AsNoTracking()
                 .Include(x => x.Items)
-                .ThenInclude(y => y.AccessoryStatus)
-                .Include(x => x.Items)
-                .ThenInclude(y => y.SocketStatus)
-                .FirstOrDefaultAsync(x => x.Id == items.First().ItemListId)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == itemListId);
 
-            if (itemListDto != null)
-            {
-                foreach (var item in items)
-                {
-                    _context.Add(_mapper.Map<ItemDTO>(item));
-                    itemListDto.Size = (byte)Math.Clamp(itemListDto.Size + 1, 0, 255);
-                }
+            if (itemListDto == null)
+                return;
 
-                _context.Update(itemListDto);
-            }
+            // 🔹 Cria todos os itens de uma vez só
+            var newItems = items.Select(item => _mapper.Map<ItemDTO>(item)).ToList();
+            await _context.Items.AddRangeAsync(newItems);
 
-            await _context.SaveChangesAsync().ConfigureAwait(false);
+            // 🔹 Atualiza o tamanho apenas uma vez
+            itemListDto.Size += (byte)newItems.Count;
+
+            // 🔹 Apenas salva alterações rastreadas (sem reattachs)
+            await _context.SaveChangesAsync();
         }
+
         public async Task UpdateCharacterEventStateByIdAsync(long characterId, CharacterEventStateEnum state)
         {
-            var dto = await _context.Character
-                .FirstOrDefaultAsync(x => x.Id == characterId)
-                .ConfigureAwait(false);
+            var dto = await _context.Character.FirstOrDefaultAsync(x => x.Id == characterId);
 
             if (dto != null)
             {
                 dto.EventState = state;
+
                 _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
+
+                await _context.SaveChangesAsync();
             }
         }
 
         public async Task UpdateEvolutionAsync(DigimonEvolutionModel evolution)
         {
             var dto = await _context.DigimonEvolution
-                .AsNoTrackingWithIdentityResolution()
-                .FirstOrDefaultAsync(x => x.Id == evolution.Id)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == evolution.Id);
 
-            if (dto != null)
-            {
-                dto.Type = evolution.Type;
-                dto.Unlocked = evolution.Unlocked;
-                dto.SkillPoints = evolution.SkillPoints;
-                dto.SkillMastery = evolution.SkillMastery;
-                dto.SkillExperience = evolution.SkillExperience;
+            if (dto == null)
+                return;
 
-                dto.Skills = _mapper.Map<List<DigimonEvolutionSkillDTO>>(evolution.Skills);
+            dto.Type = evolution.Type;
+            dto.Unlocked = evolution.Unlocked;
+            dto.SkillPoints = evolution.SkillPoints;
+            dto.SkillMastery = evolution.SkillMastery;
+            dto.SkillExperience = evolution.SkillExperience;
 
-                _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            dto.Skills = _mapper.Map<List<DigimonEvolutionSkillDTO>>(evolution.Skills);
+
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateIncubatorAsync(CharacterIncubatorModel incubator)
         {
             var dto = await _context.CharacterIncubator
-                .AsNoTrackingWithIdentityResolution()
-                .FirstOrDefaultAsync(x => x.Id == incubator.Id)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == incubator.Id);
 
-            if (dto != null)
-            {
-                dto.EggId = incubator.EggId;
-                dto.HatchLevel = incubator.HatchLevel;
-                dto.BackupDiskId = incubator.BackupDiskId;
+            if (dto == null)
+                return;
 
-                _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            dto.EggId = incubator.EggId;
+            dto.HatchLevel = incubator.HatchLevel;
+            dto.BackupDiskId = incubator.BackupDiskId;
+
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateCharacterMapRegionAsync(CharacterMapRegionModel mapRegion)
         {
             var dto = await _context.CharacterMapRegion
-                .AsNoTrackingWithIdentityResolution()
-                .FirstOrDefaultAsync(x => x.Id == mapRegion.Id)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == mapRegion.Id);
 
-            if (dto != null)
-            {
-                dto.Unlocked = mapRegion.Unlocked;
-                _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            if (dto == null)
+                return;
+
+            dto.Unlocked = mapRegion.Unlocked;
+
+            await _context.SaveChangesAsync();
         }
+
         public async Task UpdateDigimonSizeAsync(long digimonId, short size)
         {
-            var dto = await _context.Digimon
-                .FindAsync(digimonId)
-                .ConfigureAwait(false);
+            var dto = await _context.Digimon.FindAsync(digimonId);
 
             if (dto == null) return;
 
             dto.Size = size;
 
             _context.Digimon.Update(dto);
-            await _context.SaveChangesAsync().ConfigureAwait(false);
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateCharacterInitialPacketSentOnceSentAsync(long characterId, bool sendOnceSent)
         {
-            var dto = await _context.Character
-                .FirstOrDefaultAsync(x => x.Id == characterId)
-                .ConfigureAwait(false);
+            var dto = await _context.Character.FirstOrDefaultAsync(x => x.Id == characterId);
 
             if (dto == null) return;
 
             dto.InitialPacketSentOnceSent = sendOnceSent;
 
             _context.Character.Update(dto);
-            await _context.SaveChangesAsync().ConfigureAwait(false);
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateCharacterSizeAsync(long characterId, short size)
         {
             var dto = await _context.Character
-                .AsNoTrackingWithIdentityResolution()
-                .FirstOrDefaultAsync(x => x.Id == characterId)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == characterId);
 
-            if (dto != null)
-            {
-                dto.Size = size;
-                _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            if (dto == null)
+                return;
+
+            dto.Size = size;
+
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateDigimonGradeAsync(long digimonId, DigimonHatchGradeEnum grade)
         {
             var dto = await _context.Digimon
-                .AsNoTrackingWithIdentityResolution()
-                .FirstOrDefaultAsync(x => x.Id == digimonId)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == digimonId);
 
-            if (dto != null)
-            {
-                dto.HatchGrade = grade;
-                _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            if (dto == null)
+                return;
+
+            dto.HatchGrade = grade;
+
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateCharacterDigimonsOrderAsync(CharacterModel character)
@@ -988,269 +922,223 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Character
             foreach (var digimon in character.Digimons)
             {
                 var dto = await _context.Digimon
-                    .AsNoTrackingWithIdentityResolution()
-                    .FirstOrDefaultAsync(x => x.Id == digimon.Id)
-                    .ConfigureAwait(false);
+                    .FirstOrDefaultAsync(x => x.Id == digimon.Id);
 
                 if (dto != null)
                 {
                     dto.Slot = digimon.Slot;
-                    _context.Update(dto);
                 }
             }
 
-            await _context.SaveChangesAsync().ConfigureAwait(false);
+            await _context.SaveChangesAsync();
         }
 
         public async Task DeleteDigimonAsync(long digimonId)
         {
             var dto = await _context.Digimon
-                .AsNoTrackingWithIdentityResolution()
-                .FirstOrDefaultAsync(x => x.Id == digimonId)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == digimonId);
 
-            if (dto != null)
-            {
-                _context.Remove(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            if (dto == null)
+                return;
+
+            _context.Digimon.Remove(dto);
+            await _context.SaveChangesAsync();
         }
 
-        public async Task UpdateCharacterDigimonArchiveItemAsync(CharacterDigimonArchiveItemModel characterDigimonArchiveItem)
+        public async Task UpdateCharacterDigimonArchiveItemAsync(
+            CharacterDigimonArchiveItemModel characterDigimonArchiveItem)
         {
             var dto = await _context.CharacterDigimonArchiveItem
-                .AsNoTrackingWithIdentityResolution()
-                .SingleOrDefaultAsync(x => x.Id == characterDigimonArchiveItem.Id)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == characterDigimonArchiveItem.Id);
 
-            if (dto != null)
-            {
-                dto.DigimonId = characterDigimonArchiveItem.DigimonId;
-                _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            if (dto == null)
+                return;
+
+            dto.DigimonId = characterDigimonArchiveItem.DigimonId;
+
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateDigimonSlotAsync(long digimonId, byte digimonSlot)
         {
             var dto = await _context.Digimon
-                .AsNoTrackingWithIdentityResolution()
-                .SingleOrDefaultAsync(x => x.Id == digimonId)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == digimonId);
 
-            if (dto != null)
-            {
-                dto.Slot = digimonSlot;
-                _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            if (dto == null)
+                return;
+
+            dto.Slot = digimonSlot;
+
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateCharacterXaiAsync(CharacterXaiModel xai)
         {
             var dto = await _context.CharacterXai
-                .AsNoTrackingWithIdentityResolution()
-                .SingleOrDefaultAsync(x => x.Id == xai.Id)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == xai.Id);
 
-            if (dto != null)
-            {
-                dto.ItemId = xai.ItemId;
-                dto.XCrystals = xai.XCrystals;
-                dto.XGauge = xai.XGauge;
+            if (dto == null)
+                return;
 
-                _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            dto.ItemId = xai.ItemId;
+            dto.XCrystals = xai.XCrystals;
+            dto.XGauge = xai.XGauge;
+
+            await _context.SaveChangesAsync();
         }
 
         public async Task AddDigimonArchiveSlotAsync(Guid archiveId, CharacterDigimonArchiveItemModel archiveItem)
         {
             var archiveDto = await _context.CharacterDigimonArchive
-                .AsNoTrackingWithIdentityResolution()
                 .Include(x => x.DigimonArchives)
-                .SingleOrDefaultAsync(x => x.Id == archiveId)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == archiveId);
 
-            if (archiveDto != null)
-            {
-                var dto = _mapper.Map<CharacterDigimonArchiveItemDTO>(archiveItem);
-                dto.DigimonArchiveId = archiveId;
-                _context.CharacterDigimonArchiveItem.Add(dto);
+            if (archiveDto == null)
+                return;
 
-                archiveDto.Slots++;
-                _context.Update(archiveDto);
+            var dto = _mapper.Map<CharacterDigimonArchiveItemDTO>(archiveItem);
+            dto.DigimonArchiveId = archiveId;
 
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            _context.CharacterDigimonArchiveItem.Add(dto);
+            archiveDto.Slots++;
+
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateCharacterDigimonSlotsAsync(long characterId, byte slots)
         {
             var characterDto = await _context.Character
-                .AsNoTrackingWithIdentityResolution()
-                .SingleOrDefaultAsync(x => x.Id == characterId)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == characterId);
 
-            if (characterDto != null)
-            {
-                characterDto.DigimonSlots = slots;
-                _context.Update(characterDto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            if (characterDto == null)
+                return;
+
+            characterDto.DigimonSlots = slots;
+
+            await _context.SaveChangesAsync();
         }
 
-        public async Task<CharacterDTO> ChangeCharacterNameAsync(long characterId, string NewCharacterName)
+        public async Task<CharacterDTO> ChangeCharacterNameAsync(long characterId, string newCharacterName)
         {
-            var dto = await _context.Character
-                .AsNoTrackingWithIdentityResolution()
-                .FirstOrDefaultAsync(x => x.Id == characterId)
-                .ConfigureAwait(false);
+            var dto = await _context.Character.FirstOrDefaultAsync(x => x.Id == characterId);
 
-            if (dto != null)
-            {
-                dto.Name = NewCharacterName;
-                _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            if (dto == null)
+                return null;
 
+            dto.Name = newCharacterName;
+
+            await _context.SaveChangesAsync();
             return dto;
         }
 
-        public async Task<CharacterDTO> ChangeCharacterIdTpAsync(long characterId, int TargetTamerIdTP)
+        public async Task<CharacterDTO> ChangeCharacterIdTpAsync(long characterId, int targetTamerIdTP)
         {
-            var dto = await _context.Character
-                .AsNoTrackingWithIdentityResolution()
-                .FirstOrDefaultAsync(x => x.Id == characterId)
-                .ConfigureAwait(false);
+            var dto = await _context.Character.FirstOrDefaultAsync(x => x.Id == characterId);
 
-            if (dto != null)
-            {
-                dto.TargetTamerIdTP = TargetTamerIdTP;
-                _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            if (dto == null)
+                return null;
 
+            dto.TargetTamerIdTP = targetTamerIdTP;
+
+            await _context.SaveChangesAsync();
             return dto;
         }
 
         public async Task<DigimonDTO> ChangeDigimonNameAsync(long digimonId, string NewDigimonName)
         {
-            var dto = await _context.Digimon
-                .AsNoTrackingWithIdentityResolution()
-                .FirstOrDefaultAsync(x => x.Id == digimonId)
-                .ConfigureAwait(false);
+            var dto = await _context.Digimon.FirstOrDefaultAsync(x => x.Id == digimonId);
+            if (dto == null)
+                return null;
 
-            if (dto != null)
-            {
-                dto.Name = NewDigimonName;
-                _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
-
+            dto.Name = NewDigimonName;
+            await _context.SaveChangesAsync();
             return dto;
         }
 
         public async Task<CharacterDTO> ChangeTamerModelAsync(long characterId, CharacterModelEnum model)
         {
-            var dto = await _context.Character
-                .AsNoTrackingWithIdentityResolution()
-                .FirstOrDefaultAsync(x => x.Id == characterId)
-                .ConfigureAwait(false);
+            var dto = await _context.Character.FirstOrDefaultAsync(x => x.Id == characterId);
 
-            if (dto != null)
-            {
-                dto.Model = model;
-                _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            if (dto == null)
+                return null;
 
+            dto.Model = model;
+
+            await _context.SaveChangesAsync();
             return dto;
         }
+
         public async Task UpdateTamerSkillCooldownAsync(CharacterTamerSkillModel activeSkill)
         {
-            var dto = await _context.ActiveSkills
-                .AsNoTrackingWithIdentityResolution()
-                .FirstOrDefaultAsync(x => x.Id == activeSkill.Id)
-                .ConfigureAwait(false);
+            var dto = await _context.ActiveSkills.FirstOrDefaultAsync(x => x.Id == activeSkill.Id);
 
-            if (dto != null)
-            {
-                dto.SkillId = activeSkill.SkillId;
-                dto.Cooldown = activeSkill.Cooldown;
-                dto.EndCooldown = activeSkill.EndCooldown;
-                dto.Type = activeSkill.Type;
-                dto.Duration = activeSkill.Duration;
-                dto.EndDate = activeSkill.EndDate;
+            if (dto == null)
+                return;
 
-                _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            dto.SkillId = activeSkill.SkillId;
+            dto.Cooldown = activeSkill.Cooldown;
+            dto.EndCooldown = activeSkill.EndCooldown;
+            dto.Type = activeSkill.Type;
+            dto.Duration = activeSkill.Duration;
+            dto.EndDate = activeSkill.EndDate;
+
+            await _context.SaveChangesAsync();
         }
 
         public async Task AddInventorySlotAsync(ItemModel newSlot)
         {
             var itemListDto = await _context.ItemLists
-                .AsNoTracking()
                 .Include(x => x.Items)
-                .FirstOrDefaultAsync(x => x.Id == newSlot.ItemListId)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == newSlot.ItemListId);
 
-            if (itemListDto != null)
-            {
-                var dto = _mapper.Map<ItemDTO>(newSlot);
-                _context.Add(dto);
+            if (itemListDto == null)
+                return;
 
-                itemListDto.Size = (byte)Math.Clamp(itemListDto.Size + 1, 0, 255);
-                _context.Update(itemListDto);
-            }
+            var dto = _mapper.Map<ItemDTO>(newSlot);
+            await _context.Items.AddAsync(dto);
 
-            await _context.SaveChangesAsync().ConfigureAwait(false);
+            itemListDto.Size += 1;
+
+            await _context.SaveChangesAsync();
         }
+
         public async Task UpdateCharacterArenaPointsAsync(CharacterArenaPointsModel points)
         {
             var dto = await _context.CharacterPoints
-                .AsNoTrackingWithIdentityResolution()
-                .FirstOrDefaultAsync(x => x.Id == points.Id)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == points.Id);
 
-            if (dto != null)
-            {
-                dto.CurrentStage = points.CurrentStage;
-                dto.Amount = points.Amount;
-                dto.ItemId = points.ItemId;
+            if (dto == null)
+                return;
 
-                _context.CharacterPoints.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            dto.CurrentStage = points.CurrentStage;
+            dto.Amount = points.Amount;
+            dto.ItemId = points.ItemId;
+
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateCharacterInProgressAsync(InProgressQuestModel progress)
         {
             var dto = await _context.InProgressQuest
-                .AsNoTrackingWithIdentityResolution()
-                .FirstOrDefaultAsync(x => x.Id == progress.Id)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == progress.Id);
 
-            if (dto != null)
-            {
-                dto.FirstCondition = progress.FirstCondition;
-                dto.SecondCondition = progress.SecondCondition;
-                dto.ThirdCondition = progress.ThirdCondition;
-                dto.FourthCondition = progress.FourthCondition;
-                dto.FifthCondition = progress.FifthCondition;
+            if (dto == null)
+                return;
 
-                _context.InProgressQuest.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            dto.FirstCondition = progress.FirstCondition;
+            dto.SecondCondition = progress.SecondCondition;
+            dto.ThirdCondition = progress.ThirdCondition;
+            dto.FourthCondition = progress.FourthCondition;
+            dto.FifthCondition = progress.FifthCondition;
+
+            await _context.SaveChangesAsync();
         }
 
         public async Task AddCharacterProgressAsync(CharacterProgressModel progress)
         {
             var dto = await _context.CharacterProgress
                 .Include(x => x.InProgressQuestData)
-                .FirstOrDefaultAsync(x => x.Id == progress.Id)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == progress.Id);
 
             if (dto != null)
             {
@@ -1264,17 +1152,15 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Character
                     questDto.CharacterProgressId = progress.Id;
 
                     _context.InProgressQuest.Add(questDto);
+                    await _context.SaveChangesAsync();
                 }
-
-                await _context.SaveChangesAsync().ConfigureAwait(false);
             }
         }
 
         public async Task UpdateTamerAttendanceRewardAsync(AttendanceRewardModel attendanceRewardModel)
         {
             var dto = await _context.AttendanceReward
-                .FirstOrDefaultAsync(x => x.CharacterId == attendanceRewardModel.CharacterId)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.CharacterId == attendanceRewardModel.CharacterId);
 
             if (dto != null)
             {
@@ -1287,87 +1173,81 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Character
                 dto.TotalDays = attendanceRewardModel.TotalDays;
 
                 _context.AttendanceReward.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
+                await _context.SaveChangesAsync();
             }
         }
-
         public async Task UpdateCharacterDeckBuffAsync(CharacterModel character)
         {
             var dto = await _context.Character
                 .Include(x => x.DeckBuff)
                     .ThenInclude(x => x.Options)
-                    .ThenInclude(x => x.DeckBookInfo)
-                .FirstOrDefaultAsync(x => x.Id == character.Id)
-                .ConfigureAwait(false);
+                        .ThenInclude(x => x.DeckBookInfo)
+                .FirstOrDefaultAsync(x => x.Id == character.Id);
 
             if (dto != null)
             {
+                // Atualiza apenas o DeckBuffId
                 dto.DeckBuffId = character.DeckBuffId;
 
+                // Não atualiza o objeto DeckBuff diretamente, apenas o Id.
+                // Isso evita sobrescrever ou remover o DeckBuff da enciclopédia.
+
                 _context.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
+                await _context.SaveChangesAsync();
             }
         }
 
         public async Task UpdateTamerTimeRewardAsync(TimeRewardModel timeRewardModel)
         {
             var dto = await _context.TimeReward
-                .AsNoTrackingWithIdentityResolution()
-                .FirstOrDefaultAsync(x => x.CharacterId == timeRewardModel.CharacterId)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.CharacterId == timeRewardModel.CharacterId);
 
-            if (dto != null)
-            {
-                dto.StartTime = timeRewardModel.StartTime;
-                dto.RewardIndex = timeRewardModel.RewardIndex;
-                dto.AtualTime = timeRewardModel.AtualTime;
+            if (dto == null)
+                return;
 
-                _context.TimeReward.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            dto.StartTime = timeRewardModel.StartTime;
+            dto.RewardIndex = timeRewardModel.RewardIndex;
+            dto.AtualTime = timeRewardModel.AtualTime;
+
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateCharacterArenaDailyPointsAsync(CharacterArenaDailyPointsModel points)
         {
             var dto = await _context.CharacterDailyPoints
-                .AsNoTrackingWithIdentityResolution()
-                .FirstOrDefaultAsync(x => x.Id == points.Id)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == points.Id);
 
-            if (dto != null)
-            {
-                dto.InsertDate = points.InsertDate;
-                dto.Points = points.Points;
+            if (dto == null)
+                return;
 
-                _context.CharacterDailyPoints.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            dto.InsertDate = points.InsertDate;
+            dto.Points = points.Points;
+
+            await _context.SaveChangesAsync();
         }
 
-        public async Task<CharacterEncyclopediaModel> CreateCharacterEncyclopediaAsync(CharacterEncyclopediaModel characterEncyclopedia)
+        public async Task<CharacterEncyclopediaModel> CreateCharacterEncyclopediaAsync(
+    CharacterEncyclopediaModel characterEncyclopedia)
         {
             var tamerDto = await _context.Character
-                .AsNoTrackingWithIdentityResolution()
                 .Include(x => x.Encyclopedia)
                 .ThenInclude(x => x.Evolutions)
-                .SingleOrDefaultAsync(x => x.Id == characterEncyclopedia.CharacterId)
-                .ConfigureAwait(false);
+                .SingleOrDefaultAsync(x => x.Id == characterEncyclopedia.CharacterId);
+
+            if (tamerDto == null)
+                return null;
 
             var dto = _mapper.Map<CharacterEncyclopediaDTO>(characterEncyclopedia);
 
-            if (tamerDto != null)
+            try
             {
-                try
-                {
-                    tamerDto.Encyclopedia.Add(dto);
-
-                    _context.Update(tamerDto);
-                    await _context.SaveChangesAsync().ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine(ex.ToString());
-                }
+                // adiciona ao conjunto rastreado diretamente
+                tamerDto.Encyclopedia.Add(dto);
+                await _context.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.ToString());
             }
 
             return _mapper.Map<CharacterEncyclopediaModel>(dto);
@@ -1377,98 +1257,87 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Character
         {
             var dto = await _context.CharacterEncyclopedia
                 .Include(x => x.Evolutions)
-                .SingleOrDefaultAsync(x => x.Id == characterEncyclopedia.Id)
-                .ConfigureAwait(false);
+                .SingleOrDefaultAsync(x => x.Id == characterEncyclopedia.Id);
+
+            if (dto == null)
+                return;
 
             try
             {
-                if (dto != null)
+                // Atualiza propriedades principais
+                dto.Level = characterEncyclopedia.Level;
+                dto.Size = characterEncyclopedia.Size;
+                dto.EnchantAT = characterEncyclopedia.EnchantAT;
+                dto.EnchantBL = characterEncyclopedia.EnchantBL;
+                dto.EnchantCT = characterEncyclopedia.EnchantCT;
+                dto.EnchantEV = characterEncyclopedia.EnchantEV;
+                dto.EnchantHP = characterEncyclopedia.EnchantHP;
+                dto.IsRewardAllowed = characterEncyclopedia.IsRewardAllowed;
+                dto.IsRewardReceived = characterEncyclopedia.IsRewardReceived;
+                dto.CreateDate = DateTime.Now;
+
+                // Atualiza ou adiciona evoluções
+                foreach (var evolutionModel in characterEncyclopedia.Evolutions)
                 {
-                    dto.Level = characterEncyclopedia.Level;
-                    dto.Size = characterEncyclopedia.Size;
-                    dto.EnchantAT = characterEncyclopedia.EnchantAT;
-                    dto.EnchantBL = characterEncyclopedia.EnchantBL;
-                    dto.EnchantCT = characterEncyclopedia.EnchantCT;
-                    dto.EnchantEV = characterEncyclopedia.EnchantEV;
-                    dto.EnchantHP = characterEncyclopedia.EnchantHP;
-                    dto.IsRewardAllowed = characterEncyclopedia.IsRewardAllowed;
-                    dto.IsRewardReceived = characterEncyclopedia.IsRewardReceived;
-                    dto.CreateDate = DateTime.Now;
+                    var existing = dto.Evolutions.FirstOrDefault(x => x.Id == evolutionModel.Id);
 
-                    // 🔹 Atualizar evoluções uma a uma
-                    foreach (var evoModel in characterEncyclopedia.Evolutions)
+                    if (existing != null)
                     {
-                        var existing = dto.Evolutions.FirstOrDefault(e => e.Id == evoModel.Id);
-                        if (existing != null)
-                        {
-                            // Atualiza existente
-                            _mapper.Map(evoModel, existing);
-                        }
-                        else
-                        {
-                            // Adiciona nova evolução
-                            var newEvo = _mapper.Map<CharacterEncyclopediaEvolutionsDTO>(evoModel);
-                            dto.Evolutions.Add(newEvo);
-                        }
+                        existing.IsUnlocked = evolutionModel.IsUnlocked;
+                        existing.CreateDate = DateTime.Now;
                     }
-
-                    // 🔹 Remover evoluções que não existem mais no Model
-                    var toRemove = dto.Evolutions
-                        .Where(e => characterEncyclopedia.Evolutions.All(m => m.Id != e.Id))
-                        .ToList();
-                    foreach (var r in toRemove)
-                        dto.Evolutions.Remove(r);
-
-                    _context.CharacterEncyclopedia.Update(dto);
-                    await _context.SaveChangesAsync().ConfigureAwait(false);
+                    else
+                    {
+                        var newEvolution = _mapper.Map<CharacterEncyclopediaEvolutionsDTO>(evolutionModel);
+                        newEvolution.CharacterEncyclopediaId = dto.Id;
+                        dto.Evolutions.Add(newEvolution);
+                    }
                 }
+
+                await _context.SaveChangesAsync();
             }
             catch (Exception e)
             {
-                Console.WriteLine(e.Message);
-                Console.WriteLine(e.StackTrace);
+                Console.WriteLine($"[Encyclopedia Update Error] {e.Message}\n{e.StackTrace}");
                 throw;
             }
         }
 
-        public async Task UpdateCharacterEncyclopediaEvolutionsAsync(CharacterEncyclopediaEvolutionsModel characterEncyclopediaEvolution)
+        public async Task UpdateCharacterEncyclopediaEvolutionsAsync(
+    CharacterEncyclopediaEvolutionsModel characterEncyclopediaEvolution)
         {
             var dto = await _context.CharacterEncyclopediaEvolutions
-                .AsNoTrackingWithIdentityResolution()
-                .FirstOrDefaultAsync(x => x.Id == characterEncyclopediaEvolution.Id)
-                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(x => x.Id == characterEncyclopediaEvolution.Id);
 
-            if (dto != null)
-            {
-                dto.IsUnlocked = characterEncyclopediaEvolution.IsUnlocked;
-                dto.CreateDate = DateTime.Now;
+            if (dto == null)
+                return;
 
-                _context.CharacterEncyclopediaEvolutions.Update(dto);
-                await _context.SaveChangesAsync().ConfigureAwait(false);
-            }
+            dto.IsUnlocked = characterEncyclopediaEvolution.IsUnlocked;
+            dto.CreateDate = DateTime.Now;
+
+            await _context.SaveChangesAsync();
         }
 
         public async Task UpdateCharacterFriendsAsync(CharacterModel? character, bool connected = false)
         {
+            // Fetch and update records
             List<CharacterFriendDTO> dto;
             if (character != null)
             {
                 dto = await _context.CharacterFriends
                     .Where(x => x.FriendId == character.Id)
-                    .ToListAsync()
-                    .ConfigureAwait(false);
+                    .ToListAsync();
             }
             else
             {
                 dto = await _context.CharacterFriends
-                    .ToListAsync()
-                    .ConfigureAwait(false);
+                    .ToListAsync();
             }
 
             if (!dto.IsNullOrEmpty())
             {
                 dto.ForEach(friend => friend.SetConnected(connected));
-                await _context.SaveChangesAsync().ConfigureAwait(false);
+                await _context.SaveChangesAsync();
             }
         }
     }

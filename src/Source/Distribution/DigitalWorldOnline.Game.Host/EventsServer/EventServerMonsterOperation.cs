@@ -202,7 +202,7 @@ namespace DigitalWorldOnline.GameHost.EventsServer
                         if (mob.Class == 8)
                         {
                             mob.UpdateDeathAndResurrectionTime();
-                            SaveMobToDatabase(mob);
+                            SaveMobToDatabaseAsync(mob);
                         }
 
                         if (mob.RespawnInterval > 3599)
@@ -234,7 +234,7 @@ namespace DigitalWorldOnline.GameHost.EventsServer
                             if (mob.Class == 8)
                             {
                                 mob.SetDeathAndResurrectionTime(null, null);
-                                SaveMobToDatabase(mob);
+                                SaveMobToDatabaseAsync(mob);
                             }
                         }
                         else

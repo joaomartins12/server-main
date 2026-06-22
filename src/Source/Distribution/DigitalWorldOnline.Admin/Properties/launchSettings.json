@@ -2,28 +2,28 @@
     "iisSettings": {
         "windowsAuthentication": false,
         "anonymousAuthentication": true,
-      "iisExpress": {
-        "applicationUrl": "http://127.0.0.1:41001",
-        "sslPort": 44330
-      }
+        "iisExpress": {
+            "applicationUrl": "http://38.143.19.42:41001",
+            "sslPort": 44330
+        }
     },
     "profiles": {
         "IIS Express": {
             "commandName": "IISExpress",
             "launchBrowser": true,
-          "environmentVariables": {
-            "ASPNETCORE_ENVIRONMENT": "Development",
-            "ASPNETCORE_URLS": "http://127.0.0.1:41001;https://127.0.0.1:5002"
-          }
+            "environmentVariables": {
+                "ASPNETCORE_ENVIRONMENT": "Development",
+                "ASPNETCORE_URLS": "http://38.143.19.42:41001;https://38.143.19.42:5002"
+            }
         },
-      "MudblazorDemo.CRUD": {
-        "commandName": "Project",
-        "dotnetRunMessages": true,
-        "launchBrowser": true,
-        "applicationUrl": "http://127.0.0.1:41001;http://127.0.0.1:5002",
-        "environmentVariables": {
-          "ASPNETCORE_ENVIRONMENT": "Development"
+        "MudblazorDemo.CRUD": {
+            "commandName": "Project",
+            "dotnetRunMessages": true,
+            "launchBrowser": true,
+            "applicationUrl": "http://38.143.19.42:41001;http://38.143.19.42:5002",
+            "environmentVariables": {
+                "ASPNETCORE_ENVIRONMENT": "Development"
+            }
         }
-      }
     }
 }

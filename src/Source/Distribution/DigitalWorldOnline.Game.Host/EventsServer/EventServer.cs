@@ -6,6 +6,7 @@ using DigitalWorldOnline.Commons.Models.Map;
 using DigitalWorldOnline.Game.Managers;
 using DigitalWorldOnline.Infrastructure;
 using MediatR;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 
@@ -25,9 +26,8 @@ namespace DigitalWorldOnline.GameHost.EventsServer
         private readonly ILogger _logger;
         private readonly ISender _sender;
         private readonly IMapper _mapper;
-        private readonly IServiceProvider _serviceProvider;
+        private readonly IServiceScopeFactory _scopeFactory; // ✅ substitui IServiceProvider
         public List<EventConfigModel> Events { get; set; }
-
         public List<GameMap> Maps { get; set; }
 
         public EventServer(
@@ -41,7 +41,7 @@ namespace DigitalWorldOnline.GameHost.EventsServer
             ILogger logger,
             ISender sender,
             IMapper mapper,
-            IServiceProvider serviceProvider,
+            IServiceScopeFactory scopeFactory, // ✅ injeta o ScopeFactory em vez do ServiceProvider
             MapServer mapServer,
             DungeonsServer dungeonServer)
         {
@@ -55,42 +55,56 @@ namespace DigitalWorldOnline.GameHost.EventsServer
             _logger = logger;
             _sender = sender;
             _mapper = mapper;
-            _serviceProvider = serviceProvider;
+            _scopeFactory = scopeFactory; // ✅ inicializa o ScopeFactory
+            _mapServer = mapServer;
+            _dungeonServer = dungeonServer;
 
             Maps = new List<GameMap>();
             Events = configs.Events;
-            _mapServer = mapServer;
-            _dungeonServer = dungeonServer;
         }
 
-        private void SaveMobToDatabase(MobConfigModel mob)
+        /// <summary>
+        /// Atualiza o estado de um mob de evento no banco de dados (assíncrono e seguro).
+        /// </summary>
+        private async Task SaveMobToDatabaseAsync(MobConfigModel mob)
         {
-            using (var scope = _serviceProvider.CreateScope())
+            using var scope = _scopeFactory.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<DatabaseContext>();
+
+            var mobDto = await dbContext.MobConfig
+                .SingleOrDefaultAsync(m => m.Id == mob.Id);
+
+            if (mobDto == null)
             {
-                var dbContext = scope.ServiceProvider.GetRequiredService<DatabaseContext>();
-                var mobDto = dbContext.MobConfig.SingleOrDefault(m => m.Id == mob.Id);
+                _logger.Error($"❌ BOSS {mob.Name},{mob.Id} não existe no banco. Não foi possível atualizar MobConfig.");
+                return;
+            }
 
-                if (mobDto == null)
-                {
-                    _logger.Error($"BOSS {mob.Name},{mob.Id} Does not exist in the database Unable to call MobConfig.");
-                    return;
-                }
+            mobDto.DeathTime = mob.DeathTime;
+            mobDto.ResurrectionTime = mob.ResurrectionTime;
 
-                mobDto.DeathTime = mob.DeathTime;
-                mobDto.ResurrectionTime = mob.ResurrectionTime;
-
-                try
-                {
-                    dbContext.SaveChanges();
-                    _logger.Information($"BOSS {mob.Name},{mob.Id} Update seuccess.");
-                }
-                catch (Exception ex)
-                {
-                    _logger.Error($"BOSS time Update error： {mob.Name} (Id: {mob.Id}): {ex.Message}");
-                }
+            try
+            {
+                await dbContext.SaveChangesAsync(); // ✅ async + liberta conexão
+                _logger.Information($"✅ BOSS {mob.Name},{mob.Id} atualizado com sucesso.");
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"⚠️ Erro ao atualizar BOSS {mob.Name} (Id: {mob.Id}): {ex.Message}");
             }
         }
 
+        /// <summary>
+        /// Método público para atualizar mobs de evento — podes chamar quando o boss morre ou renasce.
+        /// </summary>
+        public async Task UpdateEventMobAsync(MobConfigModel mob)
+        {
+            await SaveMobToDatabaseAsync(mob);
+        }
+
+        /// <summary>
+        /// Inicializa os mapas e eventos configurados.
+        /// </summary>
         private void AddContent()
         {
             Events?.ForEach(eventConfig =>
@@ -100,28 +114,16 @@ namespace DigitalWorldOnline.GameHost.EventsServer
                     Maps.Add(new GameMap(eventMap.Map.MapId, AddMobs(), AddDrops()));
                 });
             });
-           Maps = new List<GameMap>()
+
+            Maps = new List<GameMap>
             {
                 new GameMap(9001, AddMobs(), AddDrops()),
                 new GameMap(9002, AddBoss(), new List<Drop>())
             };
         }
 
-        private List<EventMobConfigModel> AddMobs()
-        {
-            return new List<EventMobConfigModel>();
-        }
-
-        private List<Drop> AddDrops()
-        {
-            return new List<Drop>();
-        }
-
-        private List<EventMobConfigModel> AddBoss()
-        {
-            //11940
-            //15213
-            return new List<EventMobConfigModel>();
-        }
+        private List<EventMobConfigModel> AddMobs() => new();
+        private List<Drop> AddDrops() => new();
+        private List<EventMobConfigModel> AddBoss() => new(); // Exemplo: bosses de evento
     }
 }

@@ -26,13 +26,14 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             _sender = sender;
         }
 
-        public async Task Process(GameClient client, byte[] packetData)
+        public Task Process(GameClient client, byte[] packetData)
         {
-            var packet = new GamePacketReader(packetData);
-            
-            _logger.Debug($"Sending account cash coins packet for character {client.TamerId}...");
-            
+            // Avoid creating a GamePacketReader when not needed (reduces allocations)
+            _logger.Debug("Sending account cash coins packet for character {TamerId}...", client.TamerId);
+
             client.Send(new CashShopCoinsPacket(client.Premium, client.Silk));
+
+            return Task.CompletedTask;
         }
     }
 }

@@ -12,6 +12,7 @@ using DigitalWorldOnline.Commons.Packets.GameServer;
 using DigitalWorldOnline.Commons.Packets.Items;
 using DigitalWorldOnline.GameHost;
 using DigitalWorldOnline.GameHost.EventsServer;
+using DigitalWorldOnline.GameHost.Services; // added for InventoryMutationContext
 using MediatR;
 using Serilog;
 
@@ -23,8 +24,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
         private readonly MapServer _mapServer;
         private readonly DungeonsServer _dungeonServer;
-        private readonly EventServer _eventServer;
-        private readonly PvpServer _pvpServer;
+        private readonly EventServer _event_server;
+        private readonly PvpServer _pvp_server;
         private readonly ILogger _logger;
         private readonly ISender _sender;
 
@@ -32,8 +33,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         {
             _mapServer = mapServer;
             _dungeonServer = dungeonsServer;
-            _eventServer = eventServer;
-            _pvpServer = pvpServer;
+            _event_server = eventServer;
+            _pvp_server = pvpServer;
             _logger = logger;
             _sender = sender;
         }
@@ -51,11 +52,11 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     break;
 
                 case MapTypeEnum.Event:
-                    targetClient = _eventServer.FindClientByTamerHandleAndChannel(client.Tamer.TargetTradeGeneralHandle, client.TamerId);
+                    targetClient = _event_server.FindClientByTamerHandleAndChannel(client.Tamer.TargetTradeGeneralHandle, client.TamerId);
                     break;
 
                 case MapTypeEnum.Pvp:
-                    targetClient = _pvpServer.FindClientByTamerHandleAndChannel(client.Tamer.TargetTradeGeneralHandle, client.TamerId);
+                    targetClient = _pvp_server.FindClientByTamerHandleAndChannel(client.Tamer.TargetTradeGeneralHandle, client.TamerId);
                     break;
 
                 default:
@@ -68,100 +69,110 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             targetClient.Send(new TradeConfirmationPacket(client.Tamer.GeneralHandler));
             client.Tamer.SetTradeConfirm(true);
 
-            if (client.Tamer.TradeConfirm && targetClient.Tamer.TradeConfirm)
+            if (!(client.Tamer.TradeConfirm && targetClient.Tamer.TradeConfirm))
+                return;
+
+            // Verifica se ambos os jogadores possuem espaço suficiente para os itens
+            if (client.Tamer.Inventory.TotalEmptySlots < targetClient.Tamer.TradeInventory.Count)
             {
-                // Verifica se ambos os jogadores possuem espaço suficiente para os itens
-                if (client.Tamer.Inventory.TotalEmptySlots < targetClient.Tamer.TradeInventory.Count)
-                {
-                    InvalidTrade(client, targetClient);
-                    return;
-                }
-                else if (targetClient.Tamer.Inventory.TotalEmptySlots < client.Tamer.TradeInventory.Count)
-                {
-                    InvalidTrade(client, targetClient);
-                    return;
-                }
-
-                var firstTamerItems = client.Tamer.TradeInventory.EquippedItems
-    .Select(x => $"{(x.ItemInfo?.Name ?? "Unknown Item")} (ID: {x.ItemId}) x{x.Amount}");
-
-                var secondTamerItems = targetClient.Tamer.TradeInventory.EquippedItems
-                    .Select(x => $"{(x.ItemInfo?.Name ?? "Unknown Item")} (ID: {x.ItemId}) x{x.Amount}");
-
-
-                var firstTamerBits = client.Tamer.TradeInventory.Bits;
-                var secondTamerBits = targetClient.Tamer.TradeInventory.Bits;
-
-                #region ITEM TRADE
-
-                // Remove os itens trocados do inventário de ambos os jogadores
-                if (client.Tamer.TradeInventory.Count > 0)
-                    client.Tamer.Inventory.RemoveOrReduceItems(client.Tamer.TradeInventory.EquippedItems.Clone());
-
-                if (targetClient.Tamer.TradeInventory.Count > 0)
-                    targetClient.Tamer.Inventory.RemoveOrReduceItems(targetClient.Tamer.TradeInventory.EquippedItems.Clone());
-
-                // Adiciona os itens trocados ao inventário dos respectivos jogadores
-                if (targetClient.Tamer.TradeInventory.Count > 0)
-                    client.Tamer.Inventory.AddItems(targetClient.Tamer.TradeInventory.EquippedItems.Clone());
-
-                if (client.Tamer.TradeInventory.Count > 0)
-                    targetClient.Tamer.Inventory.AddItems(client.Tamer.TradeInventory.EquippedItems.Clone());
-
-                #endregion
-
-                #region BITS TRADE
-
-                // Troca os bits entre os jogadores
-                if (client.Tamer.TradeInventory.Bits >= 1)
-                {
-                    client.Tamer.Inventory.RemoveBits(client.Tamer.TradeInventory.Bits);
-                    targetClient.Tamer.Inventory.AddBits(client.Tamer.TradeInventory.Bits);
-                }
-
-                if (targetClient.Tamer.TradeInventory.Bits >= 1)
-                {
-                    targetClient.Tamer.Inventory.RemoveBits(targetClient.Tamer.TradeInventory.Bits);
-                    client.Tamer.Inventory.AddBits(targetClient.Tamer.TradeInventory.Bits);
-                }
-
-                #endregion
-
-                // Limpa a trade após a troca
-                targetClient.Tamer.ClearTrade();
-                client.Tamer.ClearTrade();
-
-                // Envia as confirmações finais de trade
-                client.Send(new TradeFinalConfirmationPacket(client.Tamer.GeneralHandler));
-                targetClient.Send(new TradeFinalConfirmationPacket(client.Tamer.GeneralHandler));
-
-                // Atualiza o inventário dos jogadores
-                await _sender.Send(new UpdateItemsCommand(targetClient.Tamer.Inventory));
-                await _sender.Send(new UpdateItemListBitsCommand(targetClient.Tamer.Inventory));
-
-                await _sender.Send(new UpdateItemsCommand(client.Tamer.Inventory));
-                await _sender.Send(new UpdateItemListBitsCommand(client.Tamer.Inventory));
-
-                // Carrega o inventário atualizado dos jogadores
-                client.Send(new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory));
-                targetClient.Send(new LoadInventoryPacket(targetClient.Tamer.Inventory, InventoryTypeEnum.Inventory));
-
-                //  _logger.Information($"Trade Finalizada: {client.Tamer.Name} trocou os seguintes itens com {targetClient.Tamer.Name}:\n" +
-                //  $"[Jogador 1: {client.Tamer.Name}] Itens: {string.Join(", ", firstTamerItems)} | Bits: {firstTamerBits}\n" +
-                //  $"[Jogador 2: {targetClient.Tamer.Name}] Itens: {string.Join(", ", secondTamerItems)} | Bits: {secondTamerBits}");
-
-                // Enviar log para o Discord
-                await _mapServer.CallDiscord(
-                 $"**Trade Finalizada**\n" +
-                 $"**Jogador 1**: {client.Tamer.Name} trocou os seguintes itens com {targetClient.Tamer.Name}:\n\n" +
-                 $"**Itens de {client.Tamer.Name}**: {string.Join("\n ", firstTamerItems)} | **Bits**: {firstTamerBits}\n" +
-                 $"**Itens de {targetClient.Tamer.Name}**: {string.Join("\n\n ", secondTamerItems)} \n **Bits**: {secondTamerBits}",
-                 client,
-                 "00ff00", // Cor de sucesso (verde)
-                 "TRADE",  // Título do log
-                 "1374552737617809428" // ID do canal Discord (substitua pelo canal correto)
-                 );
+                InvalidTrade(client, targetClient);
+                return;
             }
+            else if (targetClient.Tamer.Inventory.TotalEmptySlots < client.Tamer.TradeInventory.Count)
+            {
+                InvalidTrade(client, targetClient);
+                return;
+            }
+
+            var firstTamerItems = client.Tamer.TradeInventory.EquippedItems
+                .Select(x => $"{(x.ItemInfo?.Name ?? "Unknown Item")} (ID: {x.ItemId}) x{x.Amount}");
+
+            var secondTamerItems = targetClient.Tamer.TradeInventory.EquippedItems
+                .Select(x => $"{(x.ItemInfo?.Name ?? "Unknown Item")} (ID: {x.ItemId}) x{x.Amount}");
+
+
+            var firstTamerBits = client.Tamer.TradeInventory.Bits;
+            var secondTamerBits = targetClient.Tamer.TradeInventory.Bits;
+
+            // Create mutation contexts
+            var clientCtx = new InventoryMutationContext(client.Tamer.Inventory);
+            var targetCtx = new InventoryMutationContext(targetClient.Tamer.Inventory);
+
+            #region ITEM TRADE
+
+            // Remove os itens trocados do inventário de ambos os jogadores
+            if (client.Tamer.TradeInventory.Count > 0)
+                clientCtx.RemoveItems(client.Tamer.TradeInventory.EquippedItems.Clone());
+
+            if (targetClient.Tamer.TradeInventory.Count > 0)
+                targetCtx.RemoveItems(targetClient.Tamer.TradeInventory.EquippedItems.Clone());
+
+            // Adiciona os itens trocados ao inventário dos respectivos jogadores
+            if (targetClient.Tamer.TradeInventory.Count > 0)
+                clientCtx.AddItems(targetClient.Tamer.TradeInventory.EquippedItems.Clone());
+
+            if (client.Tamer.TradeInventory.Count > 0)
+                targetCtx.AddItems(client.Tamer.TradeInventory.EquippedItems.Clone());
+
+            #endregion
+
+            #region BITS TRADE
+
+            // Troca os bits entre os jogadores
+            if (client.Tamer.TradeInventory.Bits >= 1)
+            {
+                clientCtx.RemoveBits(client.Tamer.TradeInventory.Bits);
+                targetCtx.AddBits(client.Tamer.TradeInventory.Bits);
+            }
+
+            if (targetClient.Tamer.TradeInventory.Bits >= 1)
+            {
+                targetCtx.RemoveBits(targetClient.Tamer.TradeInventory.Bits);
+                clientCtx.AddBits(targetClient.Tamer.TradeInventory.Bits);
+            }
+
+            #endregion
+
+            targetClient.Tamer.ClearTrade();
+            client.Tamer.ClearTrade();
+
+            // Envia as confirmações finais de trade
+            client.Send(new TradeFinalConfirmationPacket(client.Tamer.GeneralHandler));
+            targetClient.Send(new TradeFinalConfirmationPacket(client.Tamer.GeneralHandler));
+
+            // Build flush batches
+            var (clientItems, clientBitsChanged, clientBits) = clientCtx.BuildFlush();
+            var (targetItems, targetBitsChanged, targetBits) = targetCtx.BuildFlush();
+
+            // Update inventories (single persistence each) ForceSync for final trade commit
+            if (clientItems.Any())
+                await _sender.Send(new UpdateItemsCommand(clientItems, true));
+            if (clientBitsChanged)
+                await _sender.Send(new UpdateItemListBitsCommand(client.Tamer.Inventory.Id, clientBits));
+
+            if (targetItems.Any())
+                await _sender.Send(new UpdateItemsCommand(targetItems, true));
+            if (targetBitsChanged)
+                await _sender.Send(new UpdateItemListBitsCommand(targetClient.Tamer.Inventory.Id, targetBits));
+
+            client.Send(new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory));
+            targetClient.Send(new LoadInventoryPacket(targetClient.Tamer.Inventory, InventoryTypeEnum.Inventory));
+
+            // _logger.Information($"Trade Finalizada: {client.Tamer.Name} trocou os seguintes itens com {targetClient.Tamer.Name}:\n" +
+            // $"[Jogador1: {client.Tamer.Name}] Itens: {string.Join(", ", firstTamerItems)} | Bits: {firstTamerBits}\n" +
+            // $"[Jogador2: {targetClient.Tamer.Name}] Itens: {string.Join(", ", secondTamerItems)} | Bits: {secondTamerBits}");
+
+            // Enviar log para o Discord
+            await _mapServer.CallDiscord(
+                $"**Trade Finalizada**\n" +
+                $"**Jogador1**: {client.Tamer.Name} trocou os seguintes itens com {targetClient.Tamer.Name}:\n\n" +
+                $"**Itens de {client.Tamer.Name}**: {string.Join("\n ", firstTamerItems)} | **Bits**: {firstTamerBits}\n" +
+                $"**Itens de {targetClient.Tamer.Name}**: {string.Join("\n\n ", secondTamerItems)} \n **Bits**: {secondTamerBits}",
+                client,
+                "00ff00", // Cor de sucesso (verde)
+                "TRADE", // Título do log
+                "1374552737617809428" // ID do canal Discord (substitua pelo canal correto)
+            );
         }
 
         private static void InvalidTrade(GameClient client, GameClient? targetClient)

@@ -75,11 +75,11 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                 client.Tamer.Inventory.RemoveOrReduceItem(targetItem, amount, slot);
 
-                // Atualiza no banco
                 await _sender.Send(new UpdateItemCommand(targetItem));
+                await _sender.Send(new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory));
 
-                // Reenvia o inventário atualizado para o cliente
-                client.Send(new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory));
+
+
 
                 // Adicionando o log do Discord
                 await _mapServer.CallDiscord(

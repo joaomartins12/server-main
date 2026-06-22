@@ -7,21 +7,29 @@ namespace DigitalWorldOnline.Application.Separar.Commands.Update
     {
         public List<ItemModel> Items { get; }
 
-        public UpdateItemsCommand(List<ItemModel> items)
+        public ItemModel Item { get; }
+
+        /// <summary>
+        /// When true, handler should persist directly (write-through) rather than enqueueing to background write-behind.
+        /// </summary>
+        public bool ForceSync { get; }
+
+        public UpdateItemsCommand(List<ItemModel> items, bool forceSync = false)
         {
             Items = items;
+            ForceSync = forceSync;
         }
 
-        public UpdateItemsCommand(ItemListModel itemList)
+        public UpdateItemsCommand(ItemListModel itemList, bool forceSync = false)
         {
             Items = itemList.Items;
+            ForceSync = forceSync;
         }
-		
-		public ItemModel Item { get; }
 
-        public UpdateItemsCommand(ItemModel item)
+        public UpdateItemsCommand(ItemModel item, bool forceSync = false)
         {
             Item = item;
+            ForceSync = forceSync;
         }
     }
 }

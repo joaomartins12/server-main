@@ -44,19 +44,19 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
                 .AsNoTracking()
                 .AsSplitQuery()
                 .Include(x => x.KillSpawns)
-                    .ThenInclude(y => y.SourceMobs)
+                .ThenInclude(y => y.SourceMobs)
                 .Include(x => x.KillSpawns)
-                    .ThenInclude(y => y.TargetMobs)
+                .ThenInclude(y => y.TargetMobs)
                 .Include(x => x.Mobs)
-                    .ThenInclude(y => y.Location)
+                .ThenInclude(y => y.Location)
                 .Include(x => x.Mobs)
-                    .ThenInclude(y => y.ExpReward)
+                .ThenInclude(y => y.ExpReward)
                 .Include(x => x.Mobs)
-                    .ThenInclude(y => y.DropReward)
-                        .ThenInclude(z => z.BitsDrop)
+                .ThenInclude(y => y.DropReward)
+                .ThenInclude(z => z.BitsDrop)
                 .Include(x => x.Mobs)
-                    .ThenInclude(y => y.DropReward)
-                        .ThenInclude(z => z.Drops)
+                .ThenInclude(y => y.DropReward)
+                .ThenInclude(z => z.Drops)
                 .Where(x => x.Type == mapType && tamerMapsIds.Contains(x.MapId))
                 .ToListAsync();
 
@@ -84,7 +84,8 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
                 .ToListAsync();
         }
 
-        public async Task<CharacterLevelStatusAssetDTO?> GetTamerLevelingStatusAsync(CharacterModelEnum type, byte level)
+        public async Task<CharacterLevelStatusAssetDTO?> GetTamerLevelingStatusAsync(CharacterModelEnum type,
+            byte level)
         {
             return await _context.TamerLevelStatusAsset
                 .AsNoTracking()
@@ -113,15 +114,19 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
                     return new List<ServerDTO>();
 
                 case AccountAccessLevelEnum.Default:
+                {
                     return await _context.ServerConfig
                         .AsNoTracking()
                         .Where(x => x.Type == ServerTypeEnum.Default)
                         .ToListAsync();
+                }
 
                 default:
+                {
                     return await _context.ServerConfig
                         .AsNoTracking()
                         .ToListAsync();
+                }
             }
         }
 
@@ -172,11 +177,13 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
                     Channel = x.Channel,
                     ItemId = x.ItemId,
                     GeneralHandler = x.GeneralHandler,
+
                     Location = new ConsignedShopLocationDTO
                     {
                         X = x.Location.X,
                         Y = x.Location.Y
                     },
+
                     CharacterId = x.CharacterId,
                 })
                 .ToListAsync();
@@ -207,7 +214,6 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
         {
             return await _context.MapRegionListAsset
                 .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.Regions)
                 .FirstOrDefaultAsync(x => x.MapId == mapId);
         }
@@ -230,7 +236,6 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
         {
             return await _context.SkillCodeAsset
                 .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.Apply)
                 .ToListAsync();
         }
@@ -253,9 +258,8 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
         {
             return await _context.EvolutionAssets
                 .AsNoTracking()
-                .AsSplitQuery()
                 .Include(evolution => evolution.Lines)
-                    .ThenInclude(mainLine => mainLine.Stages)
+                .ThenInclude(mainLine => mainLine.Stages)
                 .ToListAsync();
         }
 
@@ -263,9 +267,8 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
         {
             return await _context.EvolutionAssets
                 .AsNoTracking()
-                .AsSplitQuery()
                 .Include(evoList => evoList.Lines)
-                    .ThenInclude(mainLine => mainLine.Stages)
+                .ThenInclude(mainLine => mainLine.Stages)
                 .FirstOrDefaultAsync(x => x.Type == type);
         }
 
@@ -280,8 +283,7 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
         public async Task<List<WelcomeMessageConfigDTO>> GetWelcomeMessagesAssetsAsync()
         {
             return await _context.WelcomeMessagesConfig
-                .AsNoTracking()
-                .ToListAsync();
+                .AsNoTracking().ToListAsync();
         }
 
         public async Task<List<WelcomeMessageConfigDTO>> GetActiveWelcomeMessagesAssetsAsync()
@@ -310,11 +312,10 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
         {
             return await _context.Npcs
                 .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.Items)
                 .Include(x => x.Portals)
-                    .ThenInclude(y => y.PortalsAsset)
-                        .ThenInclude(pa => pa.npcPortalsAsset) // nome já confirmado
+                .ThenInclude(y => y.PortalsAsset)
+                .ThenInclude(pa => pa.npcPortalsAsset) // Verifique o nome correto da propriedade
                 .ToListAsync();
         }
 
@@ -322,7 +323,8 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
         {
             return await _context.ItemAsset
                 .AsNoTracking()
-                .Where(x => x.Type == 55 && x.Name.Contains("Digiclone"))
+                .Where(x => x.Type == 55 &&
+                            x.Name.Contains("Digiclone"))
                 .ToListAsync();
         }
 
@@ -330,9 +332,9 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
         {
             return await _context.ItemCraftInfo
                 .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.Materials)
-                .FirstOrDefaultAsync(x => x.NpcId == npcId && x.SequencialId == seqId);
+                .FirstOrDefaultAsync(x => x.NpcId == npcId &&
+                                          x.SequencialId == seqId);
         }
 
         public async Task<TitleStatusAssetDTO?> GetTitleStatusAssetsAsync(short titleId)
@@ -360,7 +362,6 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
         {
             return await _context.GotchaAsset
                 .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.Items)
                 .Include(x => x.RareItems)
                 .FirstOrDefaultAsync(x => x.Id == machineId);
@@ -370,7 +371,6 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
         {
             return await _context.Guild
                 .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.Authority)
                 .Include(x => x.Skills)
                 .Include(x => x.Members)
@@ -400,7 +400,6 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
         {
             return await _context.Guild
                 .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.Authority)
                 .Include(x => x.Skills)
                 .Include(x => x.Members)
@@ -412,7 +411,8 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
         {
             var adminUser = await _context.UserConfig
                 .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.Username == username && x.Password == password);
+                .FirstOrDefaultAsync(x => x.Username == username &&
+                                          x.Password == password);
 
             return adminUser?.AccessLevel ?? UserAccessLevelEnum.Unauthorized;
         }
@@ -437,7 +437,6 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
         {
             return await _context.MapConfig
                 .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.Mobs)
                 .ToListAsync();
         }
@@ -446,7 +445,6 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
         {
             return await _context.ScanDetail
                 .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.Rewards)
                 .ToListAsync();
         }
@@ -476,7 +474,6 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
         {
             return await _context.AccessoryRoll
                 .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.Status)
                 .ToListAsync();
         }
@@ -493,16 +490,13 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
 
         public async Task<List<PortalAssetDTO>> GetPortalAssetsAsync()
         {
-            return await _context.Portals
-                .AsNoTracking()
-                .ToListAsync();
+            return await _context.Portals.ToListAsync();
         }
 
         public async Task<List<ContainerAssetDTO>> GetContainerAssetsAsync()
         {
             return await _context.Container
                 .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.Rewards)
                 .ToListAsync();
         }
@@ -511,13 +505,12 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
         {
             return await _context.Quests
                 .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.QuestConditions)
                 .Include(x => x.QuestSupplies)
                 .Include(x => x.QuestEvents)
                 .Include(x => x.QuestGoals)
                 .Include(x => x.QuestRewards)
-                    .ThenInclude(x => x.RewardObjectList)
+                .ThenInclude(x => x.RewardObjectList)
                 .ToListAsync();
         }
 
@@ -525,7 +518,8 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
         {
             var dto = await _context.Routine
                 .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.Type == RoutineTypeEnum.DailyQuests);
+                .Where(x => x.Type == RoutineTypeEnum.DailyQuests)
+                .FirstOrDefaultAsync();
 
             return dto?.NextRunTime ?? DateTime.MaxValue;
         }
@@ -555,7 +549,6 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
         {
             return await _context.FruitConfig
                 .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.SizeList)
                 .ToListAsync();
         }
@@ -627,25 +620,22 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
         {
             return await _context.SummonsConfig
                 .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.SummonedMobs)
-                    .ThenInclude(y => y.Location)
+                .ThenInclude(y => y.Location)
                 .Include(x => x.SummonedMobs)
-                    .ThenInclude(y => y.DropReward)
-                        .ThenInclude(t => t.Drops)
+                .ThenInclude(y => y.DropReward)
+                .ThenInclude(t => t.Drops)
                 .Include(x => x.SummonedMobs)
-                    .ThenInclude(y => y.DropReward)
-                        .ThenInclude(t => t.BitsDrop)
+                .ThenInclude(y => y.DropReward)
+                .ThenInclude(t => t.BitsDrop)
                 .Include(x => x.SummonedMobs)
-                    .ThenInclude(y => y.ExpReward)
+                .ThenInclude(y => y.ExpReward)
                 .ToListAsync();
         }
 
         public async Task<List<SummonMobDTO>> GetSummonMobAssetsAsync()
         {
-            return await _context.SummonsMobConfig
-                .AsNoTracking()
-                .AsSplitQuery()
+            return await _context.SummonsMobConfig.AsNoTracking()
                 .Include(x => x.Location)
                 .Include(x => x.DropReward)
                     .ThenInclude(dr => dr.Drops)
@@ -657,18 +647,14 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
 
         public async Task<List<NpcColiseumAssetDTO>> GetNpcColiseumAssetsAsync()
         {
-            return await _context.NpcColiseum
-                .AsNoTracking()
-                .AsSplitQuery()
-                .Include(x => x.MobInfo)
-                .ToListAsync();
+            return await _context.NpcColiseum.AsNoTracking()
+                .Include(x => x.MobInfo).ToListAsync();
         }
 
         public async Task<ArenaRankingDTO> GetArenaRankingAsync(ArenaRankingEnum type)
         {
             var dto = await _context.ArenaRanking
                 .AsNoTracking()
-                .AsSplitQuery()
                 .Include(y => y.Competitors)
                 .FirstOrDefaultAsync(x => x.Type == type && x.EndDate >= DateTime.Now);
 
@@ -679,9 +665,7 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
         {
             return await _context.ArenaDailyItemRewards
                 .AsNoTracking()
-                .AsSplitQuery()
-                .Include(x => x.Rewards)
-                .ToListAsync();
+                .Include(x => x.Rewards).ToListAsync();
         }
 
         public async Task<List<EvolutionArmorAssetDTO>> GetEvolutionArmorAssetsAsync()
@@ -693,23 +677,23 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
 
         public async Task<List<ExtraEvolutionNpcAssetDTO>> GetExtraEvolutionNpcAssetAsync()
         {
-            return await _context.ExtraEvolutionNpc
+            var dto = await _context.ExtraEvolutionNpc
                 .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.ExtraEvolutionInformation)
-                    .ThenInclude(y => y.ExtraEvolution)
-                        .ThenInclude(z => z.Materials)
+                .ThenInclude(y => y.ExtraEvolution)
+                .ThenInclude(z => z.Materials)
                 .Include(x => x.ExtraEvolutionInformation)
-                    .ThenInclude(y => y.ExtraEvolution)
-                        .ThenInclude(z => z.Requireds)
+                .ThenInclude(y => y.ExtraEvolution)
+                .ThenInclude(z => z.Requireds)
                 .ToListAsync();
+
+            return dto;
         }
 
         public async Task<List<GotchaAssetDTO>> GetGotchaAssetsAsync()
         {
             return await _context.GotchaAsset
                 .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.Items)
                 .Include(x => x.RareItems)
                 .ToListAsync();
@@ -719,9 +703,8 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Server
         {
             return await _context.DeckBuff
                 .AsNoTracking()
-                .AsSplitQuery()
                 .Include(x => x.Options)
-                    .ThenInclude(x => x.DeckBookInfo)
+                .ThenInclude(x => x.DeckBookInfo)
                 .ToListAsync();
         }
     }

@@ -901,44 +901,23 @@ namespace DigitalWorldOnline.Commons.Models.Digimon
         /// <summary>
         /// Start partner automatic attack.
         /// </summary>
-        public void StartAutoAttack()
-        {
-            // se está a lançar skill, não iniciar auto attack
-            if (CastingSkill) return;
-            AutoAttack = true;
-        }
+        public void StartAutoAttack() => AutoAttack = true;
 
         /// <summary>
         /// Stop partner automatic attack.
         /// </summary>
-        public void StopAutoAttack()
-        {
-            // não parar se está a lançar skill
-            if (CastingSkill) return;
-            AutoAttack = false;
-        }
+        public void StopAutoAttack() => AutoAttack = false;
 
         /// <summary>
         /// Set attack end time.
         /// </summary>
-        public void SetEndAttacking(int value = 500)
-        {
-            // ataque só conta se não estiver em skill
-            if (!CastingSkill)
-                EndAttacking = DateTime.Now.AddMilliseconds(AS);
-        }
+        public void SetEndAttacking(int value = 500) => EndAttacking = DateTime.Now.AddMilliseconds(AS);
 
         /// <summary>
         /// Set skill cast end time.
         /// </summary>
         /// <param name="time">Timestamp for the skill end</param>
-        public void SetEndCasting(int time)
-        {
-            EndCasting = DateTime.Now.AddMilliseconds(time);
-            // quando inicia skill, garante que não há stop/auto attack ativo
-            AutoAttack = false;
-            PendingStop = false;
-        }
+        public void SetEndCasting(int time) => EndCasting = DateTime.Now.AddMilliseconds(500 + time);
 
         /// <summary>
         /// Increase the digimon level.

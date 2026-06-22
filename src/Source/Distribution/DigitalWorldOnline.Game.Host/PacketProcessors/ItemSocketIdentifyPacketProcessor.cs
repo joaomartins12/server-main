@@ -80,7 +80,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     else if (apply.Attribute == SkillCodeApplyAttributeEnum.MS) newtype = AccessoryStatusTypeEnum.MS;
                     else if (apply.Attribute == SkillCodeApplyAttributeEnum.MaxDS) newtype = AccessoryStatusTypeEnum.DS;
                     else newtype = AccessoryStatusTypeEnum.HP;
-                        
+
                     itemInfo.AccessoryStatus[i].SetType(newtype);
                     itemInfo.AccessoryStatus[i].SetValue((short)valorAleatorio);
 
@@ -90,7 +90,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     break;
                 }
 
-                client.Send(new ItemSocketIdentifyPacket(itemInfo,(int)client.Tamer.Inventory.Bits));
+                client.Send(new ItemSocketIdentifyPacket(itemInfo, (int)client.Tamer.Inventory.Bits));
 
                 await _sender.Send(new UpdateItemAccessoryStatusCommand(itemInfo));
                 await _sender.Send(new UpdateItemListBitsCommand(client.Tamer.Inventory));

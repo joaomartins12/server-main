@@ -33,22 +33,24 @@ namespace DigitalWorldOnline.Character
 
         private static void UnhandledExceptionHandler(object sender, UnhandledExceptionEventArgs e)
         {
-            if (e.ExceptionObject is Exception exception)
-            {
-                Console.WriteLine("==== Unhandled Exception ====");
-                Console.WriteLine($"Message: {exception.Message}");
-                Console.WriteLine($"StackTrace: {exception.StackTrace}");
-                Console.WriteLine($"Inner: {exception.InnerException}");
-            }
-
+            Console.WriteLine(((Exception)e.ExceptionObject).InnerException);
             if (e.IsTerminating)
             {
-                Console.WriteLine("Terminating due to unhandled exception...");
+                var message = "";
+                var exceptionStackTrace = "";
+                if (e.ExceptionObject is Exception exception) 
+                {
+                    message =  exception.Message;
+                    exceptionStackTrace = exception.StackTrace;
+                }
+                Console.WriteLine($"{message}");
+                Console.WriteLine($"{exceptionStackTrace}");
+                Console.WriteLine("Terminating by unhandled exception...");
             }
             else
-            {
-                Console.WriteLine("Unhandled exception caught, continuing execution...");
-            }
+                Console.WriteLine("Received unhandled exception.");
+
+            Console.ReadLine();
         }
 
         public static IHost CreateHostBuilder(string[] args)
@@ -59,20 +61,10 @@ namespace DigitalWorldOnline.Character
             return Host.CreateDefaultBuilder(args)
                 .UseSerilog()
                 .UseEnvironment("Development")
-                .ConfigureAppConfiguration((hostingContext, config) =>
-                {
-                    var env = hostingContext.HostingEnvironment;
-
-                    config.SetBasePath(Directory.GetCurrentDirectory());
-                    config.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-                          .AddJsonFile($"appsettings.{env.EnvironmentName}.json", optional: true, reloadOnChange: true);
-                    config.AddEnvironmentVariables();
-                })
                 .ConfigureServices((context, services) =>
                 {
                     services.AddDbContext<DatabaseContext>();
 
-                    // ==== Repositories ====
                     services.AddScoped<IAdminQueriesRepository, AdminQueriesRepository>();
                     services.AddScoped<IAdminCommandsRepository, AdminCommandsRepository>();
 
@@ -90,21 +82,15 @@ namespace DigitalWorldOnline.Character
 
                     services.AddScoped<IRoutineRepository, RoutineRepository>();
 
-                    // ==== Mediator / CQRS ====
+                    //services.AddScoped<IEmailService, EmailService>();
                     services.AddSingleton<ISender, ScopedSender<Mediator>>();
+                    services.AddSingleton<IProcessor, CharacterPacketProcessor>();
+                    services.AddSingleton(ConfigureLogger(context.Configuration));
+
+                    services.AddHostedService<CharacterServer>();
                     services.AddMediatR(typeof(MediatorApplicationHandlerExtension).GetTypeInfo().Assembly);
                     services.AddTransient<Mediator>();
 
-                    // ==== Packet Processor ====
-                    services.AddSingleton<IProcessor, CharacterPacketProcessor>();
-
-                    // ==== Logging ====
-                    services.AddSingleton(ConfigureLogger(context.Configuration));
-
-                    // ==== Hosted Service ====
-                    services.AddHostedService<CharacterServer>();
-
-                    // ==== AutoMapper Profiles ====
                     services.AddAutoMapper(typeof(AccountProfile));
                     services.AddAutoMapper(typeof(AssetsProfile));
                     services.AddAutoMapper(typeof(CharacterProfile));
@@ -127,9 +113,7 @@ namespace DigitalWorldOnline.Character
         {
             return new LoggerConfiguration()
                 .MinimumLevel.Verbose()
-                .WriteTo.Console(
-                    outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}",
-                    restrictedToMinimumLevel: LogEventLevel.Information)
+                .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}", restrictedToMinimumLevel: LogEventLevel.Information)
                 .WriteTo.Logger(lc => lc
                     .Filter.ByIncludingOnly(e => e.Level == LogEventLevel.Verbose)
                     .WriteTo.RollingFile(configuration["Log:VerboseRepository"] ?? "logs\\Verbose\\CharacterServer", retainedFileCountLimit: 10))
@@ -146,6 +130,49 @@ namespace DigitalWorldOnline.Character
                     .Filter.ByIncludingOnly(e => e.Level == LogEventLevel.Error)
                     .WriteTo.RollingFile(configuration["Log:ErrorRepository"] ?? "logs\\Error\\CharacterServer", retainedFileCountLimit: 5))
                 .CreateLogger();
+        }
+        private void LogMessage(ConsoleColor color, string message)
+        {
+            Console.ForegroundColor = ConsoleColor.Magenta;
+
+            Console.WriteLine("|----------------------------------------------------|");
+            Console.WriteLine("|                                                    |");
+            Console.WriteLine("|               ██████   ████████  ██    ██          |");
+            Console.WriteLine("|               ██   ██     ██     ██    ██          |");
+            Console.WriteLine("|               ██   ██     ██     ██    ██          |");
+            Console.WriteLine("|               ██   ██     ██     ██    ██          |");
+            Console.WriteLine("|               ██████      ██      ██████           |");
+            Console.WriteLine("|                                                    |");
+            Console.WriteLine("|----------------------------------------------------|");
+
+            // Exibe a história (centralizada dentro de 52 caracteres)
+            PrintCenteredLine("Um novo desafio se aproxima...");
+            PrintCenteredLine("As trevas emergem das profundezas digitais.");
+            PrintCenteredLine("Somente os mais fortes sobreviverão.");
+            PrintCenteredLine("A jornada começa agora.");
+
+            Console.WriteLine("|                                                    |");
+            Console.WriteLine("|----------------------------------------------------|");
+
+            // Mensagem personalizada
+            PrintCenteredLine(message.ToUpper());
+
+            Console.WriteLine("|                                                    |");
+
+            // Assinatura final
+            PrintCenteredLine("DTU");
+
+            Console.WriteLine("|----------------------------------------------------|");
+            Console.ResetColor();
+        }
+
+        // Função auxiliar para centralizar texto dentro da borda
+        private void PrintCenteredLine(string text)
+        {
+            int totalWidth = 52;
+            int padding = (totalWidth - text.Length) / 2;
+            string line = "|" + new string(' ', padding) + text + new string(' ', totalWidth - text.Length - padding) + "|";
+            Console.WriteLine(line);
         }
     }
 }

@@ -59,14 +59,14 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Routine
                 questIdList.ForEach(questId =>
                 {
                     progress.CompletedDataValue = MarkQuestIncomplete(questId, progress.CompletedDataValue);
-
+                    
                 });
 
                 _context.Update(progress);
             });
 
-
-            _context.SaveChanges();
+           
+            await _context.SaveChangesAsync();;
         }
         public int[] MarkQuestIncomplete(int qIDX, int[] CompleteDataInt)
         {
@@ -94,12 +94,12 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Routine
                 .AsNoTracking()
                 .FirstOrDefaultAsync(x => x.Id == routineId);
 
-            if (dto != null)
+            if(dto != null)
             {
                 dto.NextRunTime = dto.NextRunTime.AddDays(dto.Interval);
 
                 _context.Update(dto);
-                _context.SaveChanges();
+                await _context.SaveChangesAsync();;
             }
         }
     }

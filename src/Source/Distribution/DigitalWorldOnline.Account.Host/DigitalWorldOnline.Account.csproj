@@ -5,6 +5,7 @@
 		<TargetFramework>net7.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
+		<UserSecretsId>83c36b73-7aac-4934-ba12-249fe111dfbc</UserSecretsId>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -46,7 +47,9 @@
 	</ItemGroup>
 
 	<ProjectExtensions>
-		<VisualStudio><UserProperties /></VisualStudio>
+		<VisualStudio>
+			<UserProperties appsettings_1development_1json__JsonSchema="https://json.schemastore.org/appsettings.json" />
+		</VisualStudio>
 	</ProjectExtensions>
 
 </Project>
