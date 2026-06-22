@@ -26,7 +26,7 @@ namespace DigitalWorldOnline.Infrastructure
         {
             try
             {
-                optionsBuilder.UseSqlServer("Server=localhost;Database=dmo;Trusted_Connection=True;TrustServerCertificate=True;Encrypt=False;", sqlServerOptions =>
+                optionsBuilder.UseSqlServer("Server=127.0.0.1;Database=dmo;Trusted_Connection=True;TrustServerCertificate=True;Encrypt=False;", sqlServerOptions =>
                 {
                     sqlServerOptions.EnableRetryOnFailure(
                         maxRetryCount: 5, // Número máximo de tentativas
