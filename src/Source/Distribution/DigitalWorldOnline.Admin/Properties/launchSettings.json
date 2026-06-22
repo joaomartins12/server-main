@@ -3,7 +3,7 @@
         "windowsAuthentication": false,
         "anonymousAuthentication": true,
       "iisExpress": {
-        "applicationUrl": "http://178.156.191.250:41001",
+        "applicationUrl": "http://127.0.0.1:41001",
         "sslPort": 44330
       }
     },
@@ -13,14 +13,14 @@
             "launchBrowser": true,
           "environmentVariables": {
             "ASPNETCORE_ENVIRONMENT": "Development",
-            "ASPNETCORE_URLS": "http://178.156.191.250:41001;https://178.156.191.250:5002"
+            "ASPNETCORE_URLS": "http://127.0.0.1:41001;https://127.0.0.1:5002"
           }
         },
       "MudblazorDemo.CRUD": {
         "commandName": "Project",
         "dotnetRunMessages": true,
         "launchBrowser": true,
-        "applicationUrl": "http://178.156.191.250:41001;http://178.156.191.250:5002",
+        "applicationUrl": "http://127.0.0.1:41001;http://127.0.0.1:5002",
         "environmentVariables": {
           "ASPNETCORE_ENVIRONMENT": "Development"
         }
