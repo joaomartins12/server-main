@@ -254,13 +254,20 @@ namespace DigitalWorldOnline.Commons.Packets.GameServer
             }
             else
             {
-                WriteInt(0); //Party Id
-                WriteInt(0); //Party loot type
-                WriteByte(0); //Rare Rate
-                WriteByte(0); //Rare Grade
-                WriteByte(0); //Party leader slot
+                // PartyId
+                WriteInt(0);
 
-                WriteByte(99); //Fim do loop de party member
+                // LootType
+                WriteInt(0);
+
+                // LootFilter
+                WriteByte(0);
+
+                // LeaderSlot
+                WriteByte(0);
+
+                // End of party members list
+                WriteByte(99);
             }
 
             WriteShort(character.CurrentTitle);

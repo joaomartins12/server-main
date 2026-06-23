@@ -18,6 +18,8 @@ using DigitalWorldOnline.Commons.Utils;
 using MediatR;
 using Microsoft.Extensions.Configuration;
 using Serilog;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace DigitalWorldOnline.Character
 {
@@ -323,10 +325,11 @@ namespace DigitalWorldOnline.Character
 
                 case CharacterServerPacketEnum.DeleteCharacter:
                     {
-                        _logger.Information("Reading delete character packet parameters...");
+                        _logger.Information($"Reading delete character packet parameters...");
 
                         var position = packet.ReadByte();
 
+                        // O client envia 1 byte de position + 3 bytes padding antes da string.
                         packet.Skip(3);
 
                         var validation = packet.ReadString();
@@ -334,49 +337,58 @@ namespace DigitalWorldOnline.Character
                         _logger.Information($"Searching account with id {client.AccountId}...");
 
                         var account = _mapper.Map<AccountModel>(
-                            await _sender.Send(new AccountByIdQuery(client.AccountId)));
+                            await _sender.Send(new AccountByIdQuery(client.AccountId))
+                        );
 
-                        if (account == null)
+                        _logger.Warning(
+                            "[Character Deletion] Validation debug. Account={Username} Position={Position} ReceivedLen={ReceivedLen} StoredSecondLen={StoredSecondLen} EmailLen={EmailLen}",
+                            account.Username,
+                            position,
+                            validation?.Length ?? 0,
+                            account.SecondaryPassword?.Length ?? 0,
+                            account.Email?.Length ?? 0
+                        );
+
+                        if (IsValidCharacterDeleteValidation(account, validation))
                         {
-                            _logger.Warning($"[Character Deletion] AccountId: {client.AccountId}, Position: {position} - Account not found.");
-
-                            client.Send(new CharacterDeletedPacket(DeleteCharacterResultEnum.ValidationFail).Serialize());
-                            break;
-                        }
-
-                        if (IsCharacterDeleteValidationValid(account, validation))
-                        {
-                            _logger.Information("Fetching character details for deletion...");
+                            _logger.Information($"Fetching character details for deletion...");
 
                             var character = _mapper.Map<CharacterModel>(
-                                await _sender.Send(
-                                    new CharacterByAccountIdAndPositionQuery(client.AccountId, position)));
+                                await _sender.Send(new CharacterByAccountIdAndPositionQuery(client.AccountId, position))
+                            );
 
                             if (character != null)
                             {
                                 _logger.Information(
-                                    $"[Character Deletion] AccountId: {client.AccountId}, Position: {position}, Character Name: {character.Name} - Deleting character...");
+                                    $"[Character Deletion] AccountId: {client.AccountId}, Position: {position}, Character Name: {character.Name} - Deleting character..."
+                                );
 
-                                var deletedCharacter = await _sender.Send(
-                                    new DeleteCharacterCommand(client.AccountId, position));
+                                var deletedCharacter = await _sender.Send(new DeleteCharacterCommand(client.AccountId, position));
 
                                 client.Send(new CharacterDeletedPacket(deletedCharacter).Serialize());
 
                                 _logger.Information(
-                                    $"[Character Deletion] Character '{character.Name}' (Position: {position}) successfully deleted from AccountId: {client.AccountId}.");
+                                    $"[Character Deletion] Character '{character.Name}' (Position: {position}) successfully deleted from AccountId: {client.AccountId}."
+                                );
                             }
                             else
                             {
                                 _logger.Warning(
-                                    $"[Character Deletion] AccountId: {client.AccountId}, Position: {position} - Character not found!");
+                                    $"[Character Deletion] AccountId: {client.AccountId}, Position: {position} - Character not found!"
+                                );
 
-                                client.Send(new CharacterDeletedPacket(DeleteCharacterResultEnum.Error).Serialize());
+                                client.Send(new CharacterDeletedPacket(DeleteCharacterResultEnum.ValidationFail).Serialize());
                             }
                         }
                         else
                         {
                             _logger.Warning(
-                                $"[Character Deletion] Validation failed for AccountId: {account.Username}, Position: {position}.");
+                                "[Character Deletion] Validation failed. Account={Username}, Position={Position}, ReceivedLen={ReceivedLen}, StoredSecondLen={StoredSecondLen}",
+                                account.Username,
+                                position,
+                                validation?.Length ?? 0,
+                                account.SecondaryPassword?.Length ?? 0
+                            );
 
                             client.Send(new CharacterDeletedPacket(DeleteCharacterResultEnum.ValidationFail).Serialize());
                         }
@@ -477,6 +489,138 @@ namespace DigitalWorldOnline.Character
             }
 
             return string.Equals(storedSecondPassword, receivedSecondPassword, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsValidCharacterDeleteValidation(AccountModel account, string? receivedValidation)
+        {
+            if (account == null || string.IsNullOrWhiteSpace(receivedValidation))
+                return false;
+
+            var received = receivedValidation.Trim();
+
+            // Compatibilidade antiga: aceitar email.
+            if (!string.IsNullOrWhiteSpace(account.Email))
+            {
+                var email = account.Email.Trim();
+
+                if (SecureEquals(received, email))
+                    return true;
+            }
+
+            if (string.IsNullOrWhiteSpace(account.SecondaryPassword))
+                return false;
+
+            var stored = account.SecondaryPassword.Trim();
+
+            /*
+                Formatos aceites:
+
+                - plain:
+                    631998
+
+                - Base64 plain, usado pelo teu Extensions.Encrypt():
+                    NjMxOTk4
+
+                - MD5 32:
+                    md5 completo em hex
+
+                - MD5 16:
+                    alguns clients antigos usam 16 caracteres do MD5.
+                    Para máxima compatibilidade aceitamos:
+                    - primeiros 16
+                    - 16 do meio
+                    - últimos 16
+            */
+
+            var storedVariants = BuildPasswordVariants(stored);
+            var receivedVariants = BuildPasswordVariants(received);
+
+            foreach (var storedVariant in storedVariants)
+            {
+                foreach (var receivedVariant in receivedVariants)
+                {
+                    if (SecureEquals(storedVariant, receivedVariant))
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static HashSet<string> BuildPasswordVariants(string value)
+        {
+            var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            if (string.IsNullOrWhiteSpace(value))
+                return result;
+
+            value = value.Trim();
+
+            AddVariant(result, value);
+
+            var base64Decoded = TryBase64Decode(value);
+
+            if (!string.IsNullOrWhiteSpace(base64Decoded))
+                AddVariant(result, base64Decoded);
+
+            foreach (var current in result.ToList())
+            {
+                var md5 = Md5Hex32(current);
+
+                AddVariant(result, md5);
+
+                if (md5.Length == 32)
+                {
+                    AddVariant(result, md5.Substring(0, 16));
+                    AddVariant(result, md5.Substring(8, 16));
+                    AddVariant(result, md5.Substring(16, 16));
+                }
+            }
+
+            return result;
+        }
+
+        private static void AddVariant(HashSet<string> variants, string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return;
+
+            variants.Add(value.Trim());
+        }
+
+        private static string Md5Hex32(string input)
+        {
+            using var md5 = MD5.Create();
+
+            var bytes = md5.ComputeHash(Encoding.ASCII.GetBytes(input));
+
+            var sb = new StringBuilder(bytes.Length * 2);
+
+            foreach (var b in bytes)
+                sb.Append(b.ToString("x2"));
+
+            return sb.ToString();
+        }
+
+        private static string? TryBase64Decode(string input)
+        {
+            try
+            {
+                var bytes = Convert.FromBase64String(input);
+                return Encoding.ASCII.GetString(bytes);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static bool SecureEquals(string? a, string? b)
+        {
+            if (a == null || b == null)
+                return false;
+
+            return string.Equals(a.Trim(), b.Trim(), StringComparison.OrdinalIgnoreCase);
         }
 
         private static string NormalizeSecondPasswordHash(string value)

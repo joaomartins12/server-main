@@ -139,28 +139,22 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                 _logger.Debug($"Getting available channels...");
 
-                if (client.DungeonMap)
-                {
-                    character.SetCurrentChannel(0);
-                }
-                else
-                {
-                    if (character.Location.MapId == 1) character.SetCurrentChannel(0);
+                /*
+                    TEMP FIX:
+                    Forçar Channel 0 para evitar ficar preso em:
+                        Waiting map XXX CH 2 initialization...
 
-                    var channels =
-                        (Dictionary<byte, byte>)await _sender.Send(new ChannelsByMapIdQuery(character.Location.MapId));
-                    byte? channel = GetTargetChannel(character.Channel, channels);
+                    O client está a entrar no LoadingFlow corretamente.
+                    O problema atual é o server ficar bloqueado ao tentar adicionar o tamer
+                    num channel que ainda não está inicializado.
+                */
+                character.SetCurrentChannel(0);
 
-                    if (channel == null)
-                    {
-                        channel = CreateNewChannelForMap(channels);
-                    }
-
-                    if (character.Channel == byte.MaxValue)
-                    {
-                        character.SetCurrentChannel(channel.Value);
-                    }
-                }
+                _logger.Warning(
+                    "[InitialInformation] Forced channel 0 for Tamer {TamerId}:{TamerName} on MapId={MapId}",
+                    character.Id,
+                    character.Name,
+                    character.Location.MapId);
 
                 character.UpdateState(CharacterStateEnum.Loading);
                 client.SetCharacter(character);
@@ -264,10 +258,16 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     }
                 }
 
-                while (client.Loading)
-                    await Task.Delay(300);
+                _logger.Warning(
+    "[InitialInformation] Preparing InitialInfoPacket for Tamer {TamerId}:{TamerName} Map={MapId} Channel={Channel} Loading={Loading}",
+    character.Id,
+    character.Name,
+    character.Location.MapId,
+    character.Channel,
+    client.Loading);
 
                 character.SetGenericHandler(character.Partner.GeneralHandler);
+
                 if (!client.DungeonMap)
                 {
                     var region = _assets.Maps.FirstOrDefault(x => x.MapId == character.Location.MapId);
@@ -283,7 +283,28 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                         }
                     }
                 }
+
+                /*
+                    IMPORTANTE:
+                    Não esperar client.Loading antes do InitialInfoPacket.
+
+                    O client fica no LoadingFlow à espera dos dados iniciais do personagem.
+                    Se o server esperar client.Loading ficar false antes de enviar InitialInfoPacket,
+                    cria deadlock e o player nunca entra no mapa.
+                */
+                _logger.Warning(
+                    "[InitialInformation] Sending InitialInfoPacket to Tamer {TamerId}:{TamerName} Map={MapId} Channel={Channel}",
+                    character.Id,
+                    character.Name,
+                    character.Location.MapId,
+                    character.Channel);
+
                 client.Send(new InitialInfoPacket(character, null));
+
+                _logger.Warning(
+                    "[InitialInformation] InitialInfoPacket sent to Tamer {TamerId}:{TamerName}",
+                    character.Id,
+                    character.Name);
 
                 // ✅ Envia sempre a enciclopédia atualizada ao cliente ao entrar no jogo
                 client.Send(new EncyclopediaLoadPacket(character.Encyclopedia));

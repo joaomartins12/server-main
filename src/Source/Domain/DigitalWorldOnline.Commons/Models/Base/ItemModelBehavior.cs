@@ -11,13 +11,11 @@ namespace DigitalWorldOnline.Commons.Models.Base
         /// <summary>
         /// Sets the current power.
         /// </summary>
-        /// <param name="power">New power value</param>
         public void SetPower(byte power) => Power = power;
 
         /// <summary>
         /// Sets the left reroll amount.
         /// </summary>
-        /// <param name="reroll">New reroll amount</param>
         public void SetReroll(byte reroll) => RerollLeft = reroll;
 
         public void SetFamilyType(byte familyType) => FamilyType = familyType;
@@ -30,79 +28,48 @@ namespace DigitalWorldOnline.Commons.Models.Base
             if (Id == Guid.Empty)
                 Id = Guid.NewGuid();
 
-            if (AccessoryStatus == null || AccessoryStatus.Count != 8)
-            {
-                AccessoryStatus = new List<ItemAccessoryStatusModel>()
-                {
-                    new ItemAccessoryStatusModel(0),
-                    new ItemAccessoryStatusModel(1),
-                    new ItemAccessoryStatusModel(2),
-                    new ItemAccessoryStatusModel(3),
-                    new ItemAccessoryStatusModel(4),
-                    new ItemAccessoryStatusModel(5),
-                    new ItemAccessoryStatusModel(6),
-                    new ItemAccessoryStatusModel(7)
-                };
-            }
-
-            if (SocketStatus == null || SocketStatus.Count != 3)
-            {
-                SocketStatus = new List<ItemSocketStatusModel>()
-                {
-                    new ItemSocketStatusModel(0),
-                    new ItemSocketStatusModel(1),
-                    new ItemSocketStatusModel(2)
-                };
-            }
+            EnsureStatusLists();
         }
 
         public uint RemainingSeconds()
         {
-            if (!ItemInfo.TemporaryItem)
+            if (ItemInfo == null || !ItemInfo.TemporaryItem)
                 return 0;
 
             var time = (EndDate - DateTime.Now).TotalSeconds;
 
             if (time <= 0)
-            {
                 return 0;
-            }
-            else
-            {
-                return (uint)time;
-            }
+
+            return (uint)time;
         }
 
         public uint RemainingMinutes()
         {
-            if (!ItemInfo!.TemporaryItem)
+            if (ItemInfo == null || !ItemInfo.TemporaryItem)
                 return 0;
 
             if ((EndDate - DateTime.Now).TotalMinutes <= 0)
-            {
                 return 0xFFFFFFFF;
-            }
 
-            var time = (EndDate - DateTime.Now).TotalMinutes > 0 ? (int)(EndDate - DateTime.Now).TotalMinutes : 0;
+            var time = (EndDate - DateTime.Now).TotalMinutes > 0
+                ? (int)(EndDate - DateTime.Now).TotalMinutes
+                : 0;
 
             return (uint)time;
         }
 
         public uint RemainingDays()
         {
-            if (!ItemInfo.TemporaryItem)
+            if (ItemInfo == null || !ItemInfo.TemporaryItem)
                 return 0;
 
             var time = (EndDate - DateTime.Now).TotalDays;
 
             if (time <= 0)
-            {
                 return 0;
-            }
-            else
-            {
-                return (uint)time;
-            }
+
+            return (uint)time;
         }
 
         /// <summary>
@@ -112,20 +79,22 @@ namespace DigitalWorldOnline.Commons.Models.Base
         {
             get
             {
-                return ItemInfo != null && ItemInfo.UseTimeType > 0 && RemainingMinutes() == 0xFFFFFFFF && FirstExpired;
+                return ItemInfo != null &&
+                       ItemInfo.UseTimeType > 0 &&
+                       RemainingMinutes() == 0xFFFFFFFF &&
+                       FirstExpired;
             }
         }
 
-
         /// <summary>
-        /// Flag for acessory status.
+        /// Flag for accessory status.
         /// </summary>
-        public bool HasAccessoryStatus => AccessoryStatus.Any(x => x.Value > 0);
+        public bool HasAccessoryStatus => AccessoryStatus != null && AccessoryStatus.Any(x => x.Value > 0);
 
         /// <summary>
         /// Flag for socket status.
         /// </summary>
-        public bool HasSocketStatus => SocketStatus.Any(x => x.Value > 0);
+        public bool HasSocketStatus => SocketStatus != null && SocketStatus.Any(x => x.Value > 0);
 
         /// <summary>
         /// Returns the flag with the information about item duration.
@@ -150,13 +119,11 @@ namespace DigitalWorldOnline.Commons.Models.Base
         /// <summary>
         /// Updates the current item id.
         /// </summary>
-        /// <param name="itemId">The new item id</param>
         public void SetItemId(int itemId = 0) => ItemId = itemId;
 
         /// <summary>
         /// Updates the remaining time.
         /// </summary>
-        /// <param name="remainingTime">The new remaining time</param>
         public void SetRemainingTime(uint remainingTime = 0)
         {
             if (remainingTime == 4294967280)
@@ -169,7 +136,6 @@ namespace DigitalWorldOnline.Commons.Models.Base
         /// <summary>
         /// Updates the current amount.
         /// </summary>
-        /// <param name="amount">The new amount</param>
         public void SetAmount(int amount = 0) => Amount = amount;
 
         public void SetSlot(int slot) => Slot = slot;
@@ -179,19 +145,16 @@ namespace DigitalWorldOnline.Commons.Models.Base
         /// <summary>
         /// Reduces the current amount.
         /// </summary>
-        /// <param name="amount">The amount to be reduced</param>
         public void ReduceAmount(int amount) => Amount -= amount;
 
         /// <summary>
         /// Updates the sell price at tamer shop.
         /// </summary>
-        /// <param name="sellPrice">The new sell price</param>
         public void SetSellPrice(long sellprice) => TamerShopSellPrice = sellprice;
 
         /// <summary>
         /// Updates the extra information about the item.
         /// </summary>
-        /// <param name="info">The extra information</param>
         public void SetItemInfo(ItemAssetModel? info) => ItemInfo = info;
 
         public void SetFirstExpired(bool firstExpired) => FirstExpired = firstExpired;
@@ -199,230 +162,218 @@ namespace DigitalWorldOnline.Commons.Models.Base
         /// <summary>
         /// Increases the current amount.
         /// </summary>
-        /// <param name="amount">The amount to be increased</param>
         public void IncreaseAmount(int amount) => Amount += amount;
 
         /// <summary>
         /// Serializes the current item into byte array.
+        /// Always returns exactly 68 bytes.
         /// </summary>
-        /// <returns>The serialization byte array.</returns>
         public byte[] ToArray(bool simplified = false)
         {
-            byte[] buffer = Array.Empty<byte>();
-            using (MemoryStream m = new())
+            EnsureStatusLists();
+
+            using MemoryStream m = new();
+
+            if (ItemId <= 0 || Amount <= 0)
             {
-                if (ItemId > 0)
+                WriteEmptyItem(m);
+                return m.ToArray();
+            }
+
+            /*
+                Safety:
+                If ItemInfo is null, the server does not know this item in loaded assets.
+                Sending an item like this can corrupt/desync the client packet.
+                So we serialize it as an empty slot instead of throwing or sending invalid data.
+            */
+            if (ItemInfo == null)
+            {
+                Console.WriteLine(
+                    $"[ItemModel.ToArray] ItemInfo NULL. Serializing empty slot. ItemListId={ItemListId} Slot={Slot} ItemId={ItemId} Amount={Amount}");
+
+                WriteEmptyItem(m);
+                return m.ToArray();
+            }
+
+            m.Write(BitConverter.GetBytes(ItemId), 0, 4);
+            m.Write(BitConverter.GetBytes(Amount), 0, 4);
+
+            if (simplified)
+            {
+                m.Write(new byte[60], 0, 60);
+            }
+            else
+            {
+                m.Write(BitConverter.GetBytes((short)0), 0, 2);
+                m.Write(BitConverter.GetBytes((short)0), 0, 2);
+                m.WriteByte(Power);
+                m.WriteByte(RerollLeft);
+                m.Write(BitConverter.GetBytes(ItemInfo.BoundType), 0, 2);
+
+                foreach (var socketStatus in SocketStatus.OrderBy(x => x.Slot))
+                    m.Write(BitConverter.GetBytes(socketStatus.AttributeId), 0, 2);
+
+                foreach (var socketStatus in SocketStatus.OrderBy(x => x.Slot))
+                    m.WriteByte((byte)Math.Clamp(socketStatus.Value, (short)0, (short)255));
+
+                m.WriteByte(0);
+
+                foreach (var accessoryStatus in AccessoryStatus.OrderBy(x => x.Slot))
+                    m.Write(BitConverter.GetBytes(accessoryStatus.Type.GetHashCode()), 0, 2);
+
+                foreach (var accessoryStatus in AccessoryStatus.OrderBy(x => x.Slot))
+                    m.Write(BitConverter.GetBytes(accessoryStatus.Value), 0, 2);
+
+                m.Write(BitConverter.GetBytes((short)0), 0, 2);
+
+                var remainingMinutes = RemainingMinutes();
+
+                if (remainingMinutes == 0 || remainingMinutes == 0xFFFFFFFF)
                 {
-                    m.Write(BitConverter.GetBytes(ItemId), 0, 4);
-                    m.Write(BitConverter.GetBytes(Amount), 0, 4);
-
-                    if (simplified)
-                    {
-                        m.Write(new byte[60]);
-                    }
-                    else
-                    {
-                        m.Write(BitConverter.GetBytes(0), 0, 2);
-                        m.Write(BitConverter.GetBytes(0), 0, 2);
-                        m.Write(BitConverter.GetBytes((short)Power), 0, 1);
-                        m.Write(BitConverter.GetBytes((short)RerollLeft), 0, 1);
-                        m.Write(BitConverter.GetBytes(ItemInfo.BoundType), 0, 2);
-
-                        foreach (var socketStatus in SocketStatus.OrderBy(x => x.Slot))
-                        {
-                            m.Write(BitConverter.GetBytes(socketStatus.AttributeId), 0, 2);
-                        }
-
-                        foreach (var socketStatus in SocketStatus.OrderBy(x => x.Slot))
-                        {
-                            m.Write(BitConverter.GetBytes(socketStatus.Value), 0, 1);
-                        }
-
-                        m.Write(BitConverter.GetBytes(0), 0, 1);
-
-                        foreach (var accessoryStatus in AccessoryStatus.OrderBy(x => x.Slot))
-                        {
-                            m.Write(BitConverter.GetBytes(accessoryStatus.Type.GetHashCode()), 0, 2);
-                        }
-
-                        foreach (var accessoryStatus in AccessoryStatus.OrderBy(x => x.Slot))
-                        {
-                            m.Write(BitConverter.GetBytes(accessoryStatus.Value), 0, 2);
-                        }
-
-                        m.Write(BitConverter.GetBytes(0), 0, 2);
-
-                        if (RemainingMinutes() == 0) //if (RemainingMinutes() == 0xFFFFFFFF)
-                        {
-                            //m.Write(BitConverter.GetBytes(0xFFFFFFFF), 0, 4);
-                            m.Write(BitConverter.GetBytes(0), 0, 4);
-                        }
-                        else
-                        {
-                            var ts = UtilitiesFunctions.RemainingTimeMinutes((int)RemainingMinutes());
-
-                            m.Write(BitConverter.GetBytes(ts), 0, 4);
-                        }
-
-                        m.Write(BitConverter.GetBytes(0), 0, 4);
-                    }
+                    m.Write(BitConverter.GetBytes(0), 0, 4);
                 }
                 else
                 {
-                    for (int i = 0; i < GeneralSizeEnum.ItemSizeInBytes.GetHashCode(); i++)
-                        m.WriteByte(0);
+                    var ts = UtilitiesFunctions.RemainingTimeMinutes((int)remainingMinutes);
+                    m.Write(BitConverter.GetBytes(ts), 0, 4);
                 }
 
-                buffer = m.ToArray();
+                m.Write(BitConverter.GetBytes(0), 0, 4);
             }
 
-            return buffer;
+            return NormalizeItemPacketSize(m.ToArray());
         }
 
         /// <summary>
-        /// Serializes the current item into byte array.
+        /// Serializes the current gift item into byte array.
         /// </summary>
-        /// <returns>The serialization byte array.</returns>
         public byte[] GiftToArray(bool simplified = false)
         {
-            if (ItemId <= 0)
+            EnsureStatusLists();
+
+            if (ItemId <= 0 || Amount <= 0)
+                return Array.Empty<byte>();
+
+            using MemoryStream m = new();
+
+            m.Write(BitConverter.GetBytes(ItemId), 0, 4);
+            m.Write(BitConverter.GetBytes(Amount), 0, 4);
+
+            if (simplified)
             {
-                return Array.Empty<byte>(); // Retorna um array vazio se o ItemId for menor ou igual a 0.
+                m.Write(new byte[60], 0, 60);
             }
-
-            using (MemoryStream m = new())
+            else
             {
-                m.Write(BitConverter.GetBytes(ItemId), 0, 4);
-                m.Write(BitConverter.GetBytes(Amount), 0, 4);
+                m.Write(BitConverter.GetBytes((short)0), 0, 2);
+                m.Write(BitConverter.GetBytes((short)0), 0, 2);
+                m.WriteByte(Power);
+                m.WriteByte(RerollLeft);
 
-                if (simplified)
+                var boundType = ItemInfo?.BoundType ?? 0;
+                m.Write(BitConverter.GetBytes(boundType), 0, 2);
+
+                m.Write(BitConverter.GetBytes((short)0), 0, 2);
+                m.Write(BitConverter.GetBytes((short)0), 0, 2);
+                m.Write(BitConverter.GetBytes((short)0), 0, 2);
+
+                m.WriteByte(0);
+                m.WriteByte(0);
+                m.WriteByte(0);
+                m.WriteByte(0);
+
+                var orderedAccessoryStatusList = AccessoryStatus.OrderBy(x => x.Slot).ToList();
+
+                foreach (var accessoryStatus in orderedAccessoryStatusList)
+                    m.Write(BitConverter.GetBytes(accessoryStatus.Type.GetHashCode()), 0, 2);
+
+                foreach (var accessoryStatus in orderedAccessoryStatusList)
+                    m.Write(BitConverter.GetBytes(accessoryStatus.Value), 0, 2);
+
+                m.Write(BitConverter.GetBytes((short)0), 0, 2);
+
+                var remainingMinutes = RemainingMinutes();
+
+                if (remainingMinutes == 4294967280 || remainingMinutes == 0xFFFFFFFF)
                 {
-                    m.Write(new byte[60]);
+                    m.Write(BitConverter.GetBytes(remainingMinutes), 0, 4);
                 }
                 else
                 {
-                    m.Write(BitConverter.GetBytes(0), 0, 2);
-                    m.Write(BitConverter.GetBytes(0), 0, 2);
-                    m.Write(BitConverter.GetBytes((short)Power), 0, 1);
-                    m.Write(BitConverter.GetBytes((short)RerollLeft), 0, 1);
-                    m.Write(BitConverter.GetBytes(ItemInfo.BoundType), 0, 2);
-                    m.Write(BitConverter.GetBytes(0), 0, 2);
-                    m.Write(BitConverter.GetBytes(0), 0, 2);
-                    m.Write(BitConverter.GetBytes(0), 0, 2);
-                    m.Write(BitConverter.GetBytes(0), 0, 1);
-                    m.Write(BitConverter.GetBytes(0), 0, 1);
-                    m.Write(BitConverter.GetBytes(0), 0, 1);
-                    m.Write(BitConverter.GetBytes(0), 0, 1);
-
-                    var orderedAccessoryStatus = AccessoryStatus.OrderBy(x => x.Slot);
-                    var orderedAccessoryStatusList = orderedAccessoryStatus.ToList();
-
-                    foreach (var accessoryStatus in orderedAccessoryStatusList)
-                    {
-                        m.Write(BitConverter.GetBytes(accessoryStatus.Type.GetHashCode()), 0, 2);
-                    }
-
-                    foreach (var accessoryStatus in orderedAccessoryStatusList)
-                    {
-                        m.Write(BitConverter.GetBytes(accessoryStatus.Value), 0, 2);
-                    }
-
-                    m.Write(BitConverter.GetBytes(0), 0, 2);
-                    if (RemainingMinutes() == 4294967280)
-                    {
-                        m.Write(BitConverter.GetBytes(RemainingMinutes()), 0, 4);
-                    }
-                    else
-                    {
-                        m.Write(BitConverter.GetBytes(UtilitiesFunctions.RemainingTimeMinutes((int)RemainingMinutes())),
-                            0, 4);
-                    }
-
-                    m.Write(BitConverter.GetBytes(0), 0, 4);
+                    m.Write(BitConverter.GetBytes(UtilitiesFunctions.RemainingTimeMinutes((int)remainingMinutes)), 0, 4);
                 }
 
-                return m.ToArray();
+                m.Write(BitConverter.GetBytes(0), 0, 4);
             }
+
+            return NormalizeItemPacketSize(m.ToArray());
         }
 
         public byte[] NewGiftToArray()
         {
-            if (ItemId <= 0)
-            {
+            EnsureStatusLists();
+
+            if (ItemId <= 0 || Amount <= 0)
                 return Array.Empty<byte>();
-            }
 
-            using (MemoryStream m = new())
-            {
-                m.Write(BitConverter.GetBytes(ItemId), 0, 4);
-                m.Write(BitConverter.GetBytes(Amount), 0, 4);
+            using MemoryStream m = new();
 
-                m.Write(BitConverter.GetBytes(0), 0, 2);
-                m.Write(BitConverter.GetBytes(0), 0, 2);
-                m.Write(BitConverter.GetBytes((short)Power), 0, 1);
-                m.Write(BitConverter.GetBytes((short)RerollLeft), 0, 1);
+            m.Write(BitConverter.GetBytes(ItemId), 0, 4);
+            m.Write(BitConverter.GetBytes(Amount), 0, 4);
+            m.Write(BitConverter.GetBytes((short)0), 0, 2);
+            m.Write(BitConverter.GetBytes((short)0), 0, 2);
+            m.WriteByte(Power);
+            m.WriteByte(RerollLeft);
 
-                if (ItemInfo != null)
-                {
-                    m.Write(BitConverter.GetBytes(ItemInfo.BoundType), 0, 2);
-                }
-                else
-                {
-                    m.Write(BitConverter.GetBytes((short)0), 0, 2);
-                }
+            var boundType = ItemInfo?.BoundType ?? 0;
+            m.Write(BitConverter.GetBytes(boundType), 0, 2);
 
-                m.Write(BitConverter.GetBytes(0), 0, 2);
-                m.Write(BitConverter.GetBytes(0), 0, 2);
-                m.Write(BitConverter.GetBytes(0), 0, 2);
-                m.Write(BitConverter.GetBytes(0), 0, 1);
-                m.Write(BitConverter.GetBytes(0), 0, 1);
-                m.Write(BitConverter.GetBytes(0), 0, 1);
-                m.Write(BitConverter.GetBytes(0), 0, 1);
+            m.Write(BitConverter.GetBytes((short)0), 0, 2);
+            m.Write(BitConverter.GetBytes((short)0), 0, 2);
+            m.Write(BitConverter.GetBytes((short)0), 0, 2);
 
-                var orderedAccessoryStatus = AccessoryStatus.OrderBy(x => x.Slot);
-                var orderedAccessoryStatusList = orderedAccessoryStatus.ToList();
+            m.WriteByte(0);
+            m.WriteByte(0);
+            m.WriteByte(0);
+            m.WriteByte(0);
 
-                foreach (var accessoryStatus in orderedAccessoryStatusList)
-                {
-                    m.Write(BitConverter.GetBytes(accessoryStatus.Type.GetHashCode()), 0, 2);
-                }
+            var orderedAccessoryStatusList = AccessoryStatus.OrderBy(x => x.Slot).ToList();
 
-                foreach (var accessoryStatus in orderedAccessoryStatusList)
-                {
-                    m.Write(BitConverter.GetBytes(accessoryStatus.Value), 0, 2);
-                }
+            foreach (var accessoryStatus in orderedAccessoryStatusList)
+                m.Write(BitConverter.GetBytes(accessoryStatus.Type.GetHashCode()), 0, 2);
 
-                m.Write(BitConverter.GetBytes(0), 0, 2);
+            foreach (var accessoryStatus in orderedAccessoryStatusList)
+                m.Write(BitConverter.GetBytes(accessoryStatus.Value), 0, 2);
 
-                long nEndTime = (uint)new DateTimeOffset(EndDate).ToUnixTimeSeconds();
+            m.Write(BitConverter.GetBytes((short)0), 0, 2);
 
-                m.Write(BitConverter.GetBytes(nEndTime), 0, 4);
+            var unixEndTime = (uint)new DateTimeOffset(EndDate).ToUnixTimeSeconds();
+            m.Write(BitConverter.GetBytes(unixEndTime), 0, 4);
 
-                m.Write(BitConverter.GetBytes(0), 0, 4);
+            m.Write(BitConverter.GetBytes(0), 0, 4);
 
-                return m.ToArray();
-            }
+            return NormalizeItemPacketSize(m.ToArray());
         }
 
-        public string ToString()
+        public override string ToString()
         {
             var sb = new StringBuilder();
 
             if (ItemId > 0)
             {
-                sb.AppendLine($"Amount {Amount.ToString()}");
-                sb.AppendLine($"Power {Power.ToString()}");
-                sb.AppendLine($"RerollLeft {RerollLeft.ToString()}");
-                sb.AppendLine($"BoundType {ItemInfo?.BoundType.ToString()}");
+                sb.AppendLine($"Amount {Amount}");
+                sb.AppendLine($"Power {Power}");
+                sb.AppendLine($"RerollLeft {RerollLeft}");
+                sb.AppendLine($"BoundType {ItemInfo?.BoundType}");
+
+                EnsureStatusLists();
 
                 foreach (var accessoryStatus in AccessoryStatus.OrderBy(x => x.Slot))
                 {
                     sb.AppendLine($"AccessoryStatus{accessoryStatus.Slot}");
-                    sb.AppendLine($"Type {accessoryStatus.Type.ToString()}");
-                    sb.AppendLine($"Value {accessoryStatus.Value.ToString()}");
+                    sb.AppendLine($"Type {accessoryStatus.Type}");
+                    sb.AppendLine($"Value {accessoryStatus.Value}");
                 }
-
-                //sb.AppendLine($"RemainingTime {RemainingTime.ToString()}");
             }
 
             return sb.ToString();
@@ -431,29 +382,107 @@ namespace DigitalWorldOnline.Commons.Models.Base
         /// <summary>
         /// Returns the current amount of the target status type.
         /// </summary>
-        /// <param name="type">Target status type</param>
-        public byte StatusAmount(AccessoryStatusTypeEnum type) => (byte)AccessoryStatus.Count(x => x.Type == type);
+        public byte StatusAmount(AccessoryStatusTypeEnum type)
+        {
+            EnsureStatusLists();
+            return (byte)AccessoryStatus.Count(x => x.Type == type);
+        }
 
         /// <summary>
-        /// Clon's an item properties, but keeps the same identifier.
+        /// Clones an item properties, but keeps the same identifier.
         /// </summary>
-        /// <param name="id">The identifier that will be kept.</param>
-        /// <returns>The cloned item with the source identifier.</returns>
         public object Clone(Guid id)
         {
             var clonedObject = (ItemModel)Clone();
             clonedObject.Id = id;
-
             return clonedObject;
         }
 
         /// <summary>
-        /// Clon's an item properties.
+        /// Clones an item properties.
         /// </summary>
-        /// <returns>The cloned item.</returns>
         public object Clone()
         {
-            return (ItemModel)MemberwiseClone();
+            var clone = (ItemModel)MemberwiseClone();
+
+            clone.AccessoryStatus = AccessoryStatus?
+                .Select(x => new ItemAccessoryStatusModel(x.Slot)
+                {
+                    Id = x.Id,
+                    Type = x.Type,
+                    Value = x.Value,
+                    ItemId = x.ItemId
+                })
+                .ToList() ?? new List<ItemAccessoryStatusModel>();
+
+            clone.SocketStatus = SocketStatus?
+                .Select(x => new ItemSocketStatusModel(x.Slot)
+                {
+                    Id = x.Id,
+                    AttributeId = x.AttributeId,
+                    Type = x.Type,
+                    Value = x.Value,
+                    ItemId = x.ItemId
+                })
+                .ToList() ?? new List<ItemSocketStatusModel>();
+
+            return clone;
+        }
+
+        private void EnsureStatusLists()
+        {
+            if (AccessoryStatus == null || AccessoryStatus.Count != 8)
+            {
+                AccessoryStatus = new List<ItemAccessoryStatusModel>
+                {
+                    new ItemAccessoryStatusModel(0),
+                    new ItemAccessoryStatusModel(1),
+                    new ItemAccessoryStatusModel(2),
+                    new ItemAccessoryStatusModel(3),
+                    new ItemAccessoryStatusModel(4),
+                    new ItemAccessoryStatusModel(5),
+                    new ItemAccessoryStatusModel(6),
+                    new ItemAccessoryStatusModel(7)
+                };
+            }
+
+            if (SocketStatus == null || SocketStatus.Count != 3)
+            {
+                SocketStatus = new List<ItemSocketStatusModel>
+                {
+                    new ItemSocketStatusModel(0),
+                    new ItemSocketStatusModel(1),
+                    new ItemSocketStatusModel(2)
+                };
+            }
+        }
+
+        private static void WriteEmptyItem(MemoryStream m)
+        {
+            for (int i = 0; i < GeneralSizeEnum.ItemSizeInBytes.GetHashCode(); i++)
+                m.WriteByte(0);
+        }
+
+        private static byte[] NormalizeItemPacketSize(byte[] data)
+        {
+            var expectedSize = GeneralSizeEnum.ItemSizeInBytes.GetHashCode();
+
+            if (data.Length == expectedSize)
+                return data;
+
+            var normalized = new byte[expectedSize];
+
+            Buffer.BlockCopy(
+                data,
+                0,
+                normalized,
+                0,
+                Math.Min(data.Length, expectedSize));
+
+            Console.WriteLine(
+                $"[ItemModel.ToArray] Normalized item packet size from {data.Length} to {expectedSize} bytes.");
+
+            return normalized;
         }
     }
 }
