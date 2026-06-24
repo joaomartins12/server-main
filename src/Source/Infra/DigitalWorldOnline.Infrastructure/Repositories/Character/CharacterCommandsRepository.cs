@@ -113,7 +113,6 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Character
             try
             {
                 var dto = await _context.Character
-                    .AsNoTracking() // ✅ permitido aqui
                     .AsSplitQuery()
                     .Include(x => x.Incubator)
                     .Include(x => x.Location)
@@ -139,22 +138,78 @@ namespace DigitalWorldOnline.Infrastructure.Repositories.Character
                         .ThenInclude(y => y.Location)
                     .Include(x => x.Digimons)
                         .ThenInclude(y => y.BuffList)
-                        .ThenInclude(z => z.Buffs)
+                            .ThenInclude(z => z.Buffs)
                     .Include(x => x.Digimons)
                         .ThenInclude(z => z.Evolutions)
-                    .SingleOrDefaultAsync(x => x.AccountId == accountId &&
-                                               x.Position == characterPosition);
+                    .SingleOrDefaultAsync(x =>
+                        x.AccountId == accountId &&
+                        x.Position == characterPosition);
 
-                if (dto != null)
+                if (dto == null)
                 {
-                    _context.Remove(dto);
+                    Console.WriteLine(
+                        $"[DeleteCharacter][ERROR] Character not found. AccountId={accountId} Position={characterPosition}");
+
+                    return DeleteCharacterResultEnum.Error;
+                }
+
+                var characterId = dto.Id;
+
+                /*
+                    Antes de apagar o character, temos de remover as relações de amizade.
+
+                    O erro que apareceu foi:
+
+                    FK_Friend_Tamer_FriendId
+                    table: Character.Friend
+                    column: FriendId
+
+                    No teu DbContext, o DbSet correto é:
+                    _context.CharacterFriends
+
+                    O character pode aparecer como:
+                    - CharacterId
+                    - FriendId
+                */
+
+                var friendRows = await _context.CharacterFriends
+                    .Where(x =>
+                        x.CharacterId == characterId ||
+                        x.FriendId == characterId)
+                    .ToListAsync();
+
+                if (friendRows.Any())
+                {
+                    Console.WriteLine(
+                        $"[DeleteCharacter] Removing {friendRows.Count} friend rows for CharacterId={characterId}");
+
+                    _context.CharacterFriends.RemoveRange(friendRows);
+
                     await _context.SaveChangesAsync();
                 }
 
-                return DeleteCharacterResultEnum.Deleted;
+                _context.Character.Remove(dto);
+
+                var changes = await _context.SaveChangesAsync();
+
+                var stillExists = await _context.Character
+                    .AsNoTracking()
+                    .AnyAsync(x =>
+                        x.AccountId == accountId &&
+                        x.Position == characterPosition);
+
+                Console.WriteLine(
+                    $"[DeleteCharacter] Delete attempted. AccountId={accountId} Position={characterPosition} CharacterId={characterId} Changes={changes} StillExists={stillExists}");
+
+                return stillExists
+                    ? DeleteCharacterResultEnum.Error
+                    : DeleteCharacterResultEnum.Deleted;
             }
-            catch
+            catch (Exception ex)
             {
+                Console.WriteLine(
+                    $"[DeleteCharacter][ERROR] AccountId={accountId} Position={characterPosition} Error={ex}");
+
                 return DeleteCharacterResultEnum.Error;
             }
         }

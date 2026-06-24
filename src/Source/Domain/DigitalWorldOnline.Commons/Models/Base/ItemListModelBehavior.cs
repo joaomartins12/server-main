@@ -873,7 +873,18 @@ namespace DigitalWorldOnline.Commons.Models.Base
                 var sortedItems = Items.OrderBy(x => x.Slot);
 
                 foreach (var item in sortedItems)
-                    m.Write(item.ToArray(), 0, 68);
+                {
+                    var itemArray = item.ToArray();
+
+                    if (itemArray.Length < 68)
+                    {
+                        var fixedArray = new byte[68];
+                        Array.Copy(itemArray, fixedArray, itemArray.Length);
+                        itemArray = fixedArray;
+                    }
+
+                    m.Write(itemArray, 0, 68);
+                }
 
                 buffer = m.ToArray();
             }

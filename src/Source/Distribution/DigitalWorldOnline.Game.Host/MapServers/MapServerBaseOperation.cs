@@ -26,28 +26,26 @@ namespace DigitalWorldOnline.GameHost
         private DateTime _lastConsignedShopsSearch = DateTime.Now;
         private byte _loadChannel = 0;
 
-        // Background sync task for maps and objects
         private Task? _backgroundSyncTask;
 
-        // Cache for map templates to avoid DB calls on client connect
         private readonly object _cacheLock = new object();
+        private readonly object _mapsLock = new object();
+
         private List<GameMap> _cachedMapTemplates = new List<GameMap>();
 
-        //TODO: externalizar
         private readonly int _startToSee = 18000;
         private readonly int _stopSeeing = 18001;
 
-        /// <summary>
-        /// Cleans unused running maps.
-        /// </summary>
         public Task CleanMaps()
         {
-            var mapsToRemove = new List<GameMap>();
-            mapsToRemove.AddRange(Maps.Where(x => x.CloseMap));
-
-            foreach (var map in mapsToRemove)
+            lock (_mapsLock)
             {
-                Maps.Remove(map);
+                var mapsToRemove = Maps.Where(x => x.CloseMap).ToList();
+
+                foreach (var map in mapsToRemove)
+                {
+                    Maps.Remove(map);
+                }
             }
 
             return Task.CompletedTask;
@@ -55,45 +53,49 @@ namespace DigitalWorldOnline.GameHost
 
         public Task CleanMap(int ChannelId)
         {
-            var mapToClose = Maps.FirstOrDefault(x => x.Channel == ChannelId);
-
-            if (mapToClose != null)
+            lock (_mapsLock)
             {
-                _logger.Information($"Removing inactive map for {mapToClose.Type} mapID: {mapToClose.MapId} - {mapToClose.Name}");
-                Maps.Remove(mapToClose);
+                var mapToClose = Maps.FirstOrDefault(x => x.Channel == ChannelId);
+
+                if (mapToClose != null)
+                {
+                    _logger.Information($"Removing inactive map for {mapToClose.Type} mapID: {mapToClose.MapId} - {mapToClose.Name}");
+                    Maps.Remove(mapToClose);
+                }
             }
 
             return Task.CompletedTask;
         }
 
-        /// <summary>
-        /// Search for new maps to instance.
-        /// </summary>
         public async Task SearchNewMaps(CancellationToken cancellationToken)
         {
             Stopwatch stopwatch = Stopwatch.StartNew();
+
             if (DateTime.Now > _lastMapsSearch)
             {
                 var mapsToLoad =
                     _mapper.Map<List<GameMap>>(await _sender.Send(new GameMapsConfigQuery(MapTypeEnum.Default), cancellationToken));
 
-                // Update cache of templates
                 lock (_cacheLock)
                 {
                     _cachedMapTemplates = mapsToLoad.Select(m => _mapper.Map<GameMap>(m)).ToList();
                 }
 
-                foreach (var newMap in mapsToLoad)
+                lock (_mapsLock)
                 {
-                    if (!Maps.Any(x => x.Id == newMap.Id && x.Channel == _loadChannel))
+                    foreach (var newMap in mapsToLoad)
                     {
-                        newMap.Channel = _loadChannel;
-                        Maps.Add(newMap);
+                        if (!Maps.Any(x => x.Id == newMap.Id && x.Channel == _loadChannel))
+                        {
+                            newMap.Channel = _loadChannel;
+                            Maps.Add(newMap);
+                        }
                     }
                 }
 
                 _lastMapsSearch = DateTime.Now.AddSeconds(5);
             }
+
             _logger.Information($"[MAP SEARCH] Maps search completed in {stopwatch.ElapsedMilliseconds}ms");
         }
 
@@ -101,24 +103,24 @@ namespace DigitalWorldOnline.GameHost
         {
             var mapsToLoad = _mapper.Map<List<GameMap>>(await _sender.Send(new GameMapConfigsQuery()));
 
-            foreach (var newMap in mapsToLoad)
+            lock (_mapsLock)
             {
-                if (newMap.MapId == client.Tamer.Location.MapId)
+                foreach (var newMap in mapsToLoad)
                 {
-                    if (!Maps.Any(x => x.MapId == client.Tamer.Location.MapId && x.Channel == client.Tamer.Channel))
+                    if (newMap.MapId == client.Tamer.Location.MapId)
                     {
-                        if (newMap.Type == MapTypeEnum.Default)
+                        if (!Maps.Any(x => x.MapId == client.Tamer.Location.MapId && x.Channel == client.Tamer.Channel))
                         {
-                            //newMap.Channel = client.Tamer.Channel;
-                            newMap.Channel = _loadChannel;
-                            //_logger.Information($"Initializing new {newMap.Type} map {newMap.MapId} Ch {client.Tamer.Channel} - {newMap.Name} ...");
-                            Maps.Add(newMap);
+                            if (newMap.Type == MapTypeEnum.Default)
+                            {
+                                newMap.Channel = _loadChannel;
+                                Maps.Add(newMap);
+                            }
                         }
                     }
                 }
             }
 
-            // Also update cache
             lock (_cacheLock)
             {
                 _cachedMapTemplates = mapsToLoad.Select(m => _mapper.Map<GameMap>(m)).ToList();
@@ -131,84 +133,74 @@ namespace DigitalWorldOnline.GameHost
         {
             if (DateTime.Now > _lastMapsSearch)
             {
-                //_mapper.Map<List<MapAssetModel>>(await _sender.Send(new MapAssetsQuery()));
                 var mapsToLoad = _mapper.Map<List<GameMap>>(await _sender.Send(new GameMapConfigsQuery()));
 
-
-                foreach (var newMap in mapsToLoad)
+                lock (_mapsLock)
                 {
-                    if (!Maps.Any(x => x.Id == newMap.Id && x.Type == MapTypeEnum.Default))
+                    foreach (var newMap in mapsToLoad)
                     {
-                        if (newMap.Type == MapTypeEnum.Default)
+                        if (!Maps.Any(x => x.Id == newMap.Id && x.Type == MapTypeEnum.Default))
                         {
-                            newMap.Channel = 0;
-                            Maps.Add(newMap);
+                            if (newMap.Type == MapTypeEnum.Default)
+                            {
+                                newMap.Channel = 0;
+                                Maps.Add(newMap);
+                            }
                         }
                     }
                 }
-
 
                 _lastMapsSearch = DateTime.Now.AddSeconds(10);
             }
         }
 
-        /// <summary>
-        /// Gets the maps objects.
-        /// </summary>
         public async Task GetMapObjects(CancellationToken cancellationToken)
         {
             Stopwatch stopwatch = Stopwatch.StartNew();
+
             await GetMapConsignedShops(cancellationToken);
+
             _logger.Information($"[MAP OBJECTS] Consigned shops synced in {stopwatch.ElapsedMilliseconds}ms");
+
             stopwatch.Restart();
+
             await GetMapMobs(cancellationToken);
+
             _logger.Information($"[MAP OBJECTS] Mobs synced in {stopwatch.ElapsedMilliseconds}ms");
         }
 
-        /// <summary>
-        /// Gets the map latest mobs.
-        /// </summary>
-        /// <returns>The mobs collection</returns>
         private async Task GetMapMobs(CancellationToken cancellationToken)
         {
             if (DateTime.Now > _lastMobsSearch)
             {
-                // Take a snapshot of initialized maps
-                var initializedMaps = Maps.Where(x => x.Initialized).ToList();
+                List<GameMap> initializedMaps;
+
+                lock (_mapsLock)
+                {
+                    initializedMaps = Maps.Where(x => x.Initialized).ToList();
+                }
 
                 foreach (var map in initializedMaps)
                 {
-                    // Fetch mob configurations for the map using MobManager to benefit from cache/coalescing
                     var mapMobs = await _mobManager.GetMobsForMapAsync(map.Id, cancellationToken);
 
-                    // Check if an update is necessary and apply it
                     if (map.RequestMobsUpdate(mapMobs))
+                    {
                         map.UpdateMobsList();
+                    }
                 }
 
-                // Update the mob search timestamp
                 _lastMobsSearch = DateTime.Now.AddSeconds(30);
             }
         }
 
-        /// <summary>
-        /// Gets the consigned shops latest list.
-        /// </summary>
-        /// <returns>The consigned shops collection</returns>
         private async Task GetMapConsignedShops(CancellationToken cancellationToken)
         {
-            // Delegated entirely to ConsignedShopManager via _shopManager.SyncPlayerShopsAsync in map loop.
-            // Previous DB polling removed to reduce duplicate ConsignedShopsQuery load.
             await Task.CompletedTask;
         }
 
-        /// <summary>
-        /// The default hosted service "starting" method.
-        /// </summary>
-        /// <param name="cancellationToken">Control token for the operation</param>
         public async Task StartAsync(CancellationToken cancellationToken)
         {
-            // Start background sync loop to avoid blocking the main map loop on DB calls
             if (_backgroundSyncTask == null || _backgroundSyncTask.IsCompleted)
             {
                 _backgroundSyncTask = Task.Run(() => SyncMapsAndObjectsLoop(cancellationToken), cancellationToken);
@@ -219,15 +211,28 @@ namespace DigitalWorldOnline.GameHost
                 try
                 {
                     await CleanMaps();
-                    // SearchNewMaps and GetMapObjects are executed in background by SyncMapsAndObjectsLoop
+
+                    List<GameMap> mapsSnapshot;
+
+                    lock (_mapsLock)
+                    {
+                        mapsSnapshot = Maps.ToList();
+                    }
 
                     var tasks = new List<Task>();
 
-                    Maps.ForEach(map => { tasks.Add(RunMap(map)); });
+                    foreach (var map in mapsSnapshot)
+                    {
+                        tasks.Add(RunMap(map));
+                    }
 
                     await Task.WhenAll(tasks);
 
                     await Task.Delay(100, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
                 }
                 catch (Exception ex)
                 {
@@ -237,10 +242,6 @@ namespace DigitalWorldOnline.GameHost
             }
         }
 
-        /// <summary>
-        /// Runs the target map operations.
-        /// </summary>
-        /// <param name="map">the target map</param>
         private async Task RunMap(GameMap map)
         {
             try
@@ -251,7 +252,6 @@ namespace DigitalWorldOnline.GameHost
                 var stopwatch = new Stopwatch();
                 stopwatch.Start();
 
-                // Operações do mapa
                 var tamerStopwatch = new Stopwatch();
                 tamerStopwatch.Start();
                 await Task.Run(() => TamerOperation(map));
@@ -267,24 +267,22 @@ namespace DigitalWorldOnline.GameHost
                 await Task.Run(() => DropsOperation(map));
                 dropsStopwatch.Stop();
 
-                // 🔹 Adicionamos aqui a sincronização das lojas
                 var shopStopwatch = new Stopwatch();
                 shopStopwatch.Start();
 
-                if (map.Clients.Any())
+                var clientsSnapshot = map.Clients.ToList();
+
+                foreach (var client in clientsSnapshot)
                 {
-                    foreach (var client in map.Clients)
+                    if (client?.Tamer != null && client.IsConnected)
                     {
-                        if (client?.Tamer != null && client.IsConnected)
+                        try
                         {
-                            try
-                            {
-                                await _shopManager.SyncPlayerShopsAsync(client);
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.Error(ex, "[SHOP MANAGER] Erro ao sincronizar lojas para {Tamer}", client.Tamer?.Name ?? "Unknown");
-                            }
+                            await _shopManager.SyncPlayerShopsAsync(client);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.Error(ex, "[SHOP MANAGER] Erro ao sincronizar lojas para {Tamer}", client.Tamer?.Name ?? "Unknown");
                         }
                     }
                 }
@@ -292,6 +290,7 @@ namespace DigitalWorldOnline.GameHost
                 shopStopwatch.Stop();
 
                 stopwatch.Stop();
+
                 var totalTime = stopwatch.Elapsed.TotalMilliseconds;
                 var delayTime = (int)Math.Max(500 - totalTime, 100);
 
@@ -311,26 +310,36 @@ namespace DigitalWorldOnline.GameHost
             }
         }
 
-        /// <summary>
-        /// Adds a new gameclient to the target map.
-        /// </summary>
-        /// <param name="client">The game client to be added.</param>
         public async Task AddClient(GameClient client)
         {
             if (client.Tamer.TargetTamerIdTP > 0)
             {
-                var map = Maps.FirstOrDefault(x =>
-                    x.Clients.Exists(gameClient => gameClient.TamerId == client.Tamer.TargetTamerIdTP));
+                GameMap? map;
+
+                lock (_mapsLock)
+                {
+                    map = Maps.FirstOrDefault(x =>
+                        x.Clients.Exists(gameClient => gameClient.TamerId == client.Tamer.TargetTamerIdTP));
+                }
 
                 client.SetLoading();
 
                 if (map != null)
+                {
                     AddClientToMap(client, map);
+                }
             }
             else
             {
-                var map = Maps.FirstOrDefault(x =>
-                    x.Initialized && x.MapId == client.Tamer.Location.MapId && x.Channel == client.Tamer.Channel);
+                GameMap? map;
+
+                lock (_mapsLock)
+                {
+                    map = Maps.FirstOrDefault(x =>
+                        x.Initialized &&
+                        x.MapId == client.Tamer.Location.MapId &&
+                        x.Channel == client.Tamer.Channel);
+                }
 
                 client.SetLoading();
 
@@ -341,15 +350,20 @@ namespace DigitalWorldOnline.GameHost
                 else
                 {
                     var stopWatch = Stopwatch.StartNew();
-                    var timeLimit = 150000; // 15 segundos
-                    var delayInterval = 2500; // 2,5 segundos
+                    var timeLimit = 150000;
+                    var delayInterval = 2500;
 
                     while (map == null && stopWatch.ElapsedMilliseconds < timeLimit)
                     {
                         await Task.Delay(delayInterval);
 
-                        map = Maps.FirstOrDefault(x =>
-                            x.Initialized && x.MapId == client.Tamer.Location.MapId && x.Channel == client.Tamer.Channel);
+                        lock (_mapsLock)
+                        {
+                            map = Maps.FirstOrDefault(x =>
+                                x.Initialized &&
+                                x.MapId == client.Tamer.Location.MapId &&
+                                x.Channel == client.Tamer.Channel);
+                        }
 
                         if (map == null)
                         {
@@ -379,13 +393,14 @@ namespace DigitalWorldOnline.GameHost
             client.Tamer.Revive();
         }
 
-        /// <summary>
-        /// Removes the gameclient from the target map.
-        /// </summary>
-        /// <param name="client">The gameclient to be removed.</param>
         public void RemoveClient(GameClient client)
         {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == client.TamerId));
+            GameMap? map;
+
+            lock (_mapsLock)
+            {
+                map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == client.TamerId));
+            }
 
             map?.BroadcastForTargetTamers(client.TamerId,
                 new LocalMapSwapPacket(
@@ -403,239 +418,421 @@ namespace DigitalWorldOnline.GameHost
 
         public void BroadcastForChannel(byte channel, byte[] packet)
         {
-            var maps = Maps.Where(x => x.Channel == channel).ToList();
+            List<GameMap> maps;
 
-            maps?.ForEach(map => { map.BroadcastForMap(packet); });
+            lock (_mapsLock)
+            {
+                maps = Maps.Where(x => x.Channel == channel).ToList();
+            }
+
+            foreach (var map in maps)
+            {
+                map.BroadcastForMap(packet);
+            }
         }
 
         public void BroadcastGlobal(byte[] packet)
         {
-            var maps = Maps.Where(x => x.Clients.Any()).ToList();
+            List<GameMap> maps;
 
-            maps?.ForEach(map => { map.BroadcastForMap(packet); });
+            lock (_mapsLock)
+            {
+                maps = Maps.Where(x => x.Clients.Any()).ToList();
+            }
+
+            foreach (var map in maps)
+            {
+                map.BroadcastForMap(packet);
+            }
         }
 
         public void BroadcastForSelectedMaps(byte[] packet, List<int> mapIds)
         {
-            var maps = Maps.Where(map => map.Clients.Any() && mapIds.Contains(map.MapId)).ToList();
+            List<GameMap> maps;
 
-            maps?.ForEach(map => { map.BroadcastForMap(packet); });
+            lock (_mapsLock)
+            {
+                maps = Maps.Where(map => map.Clients.Any() && mapIds.Contains(map.MapId)).ToList();
+            }
+
+            foreach (var map in maps)
+            {
+                map.BroadcastForMap(packet);
+            }
         }
 
         public void BroadcastForMap(short mapId, byte[] packet)
         {
-            var map = Maps.FirstOrDefault(x => x.MapId == mapId);
+            GameMap? map;
+
+            lock (_mapsLock)
+            {
+                map = Maps.FirstOrDefault(x => x.MapId == mapId);
+            }
 
             map?.BroadcastForMap(packet);
         }
 
         public void BroadcastForMapAllChannels(short mapId, byte[] packet)
         {
-            var maps = Maps.Where(x => x.Clients.Exists(gameClient => gameClient.Tamer.Location.MapId == mapId))
-                .SelectMany(map => map.Clients);
-            maps.ToList().ForEach(client => { client.Send(packet); });
+            List<GameClient> clients;
+
+            lock (_mapsLock)
+            {
+                clients = Maps
+                    .Where(x => x.Clients.Exists(gameClient => gameClient.Tamer.Location.MapId == mapId))
+                    .SelectMany(map => map.Clients)
+                    .ToList();
+            }
+
+            foreach (var client in clients)
+            {
+                client.Send(packet);
+            }
         }
 
         public void BroadcastForUniqueTamer(long tamerId, byte[] packet)
         {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            GameMap? map;
+
+            lock (_mapsLock)
+            {
+                map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            }
 
             map?.BroadcastForUniqueTamer(tamerId, packet);
         }
 
         public GameClient? FindClientByTamerId(long tamerId)
         {
-            return Maps.SelectMany(map => map.Clients).FirstOrDefault(client => client.TamerId == tamerId);
+            lock (_mapsLock)
+            {
+                return Maps.SelectMany(map => map.Clients).FirstOrDefault(client => client.TamerId == tamerId);
+            }
         }
 
         public GameClient? FindClientByTamerName(string tamerName)
         {
-            return Maps.SelectMany(map => map.Clients).FirstOrDefault(client => client.Tamer.Name == tamerName);
+            lock (_mapsLock)
+            {
+                return Maps.SelectMany(map => map.Clients).FirstOrDefault(client => client.Tamer.Name == tamerName);
+            }
         }
 
         public GameClient? FindClientByTamerHandle(int handle)
         {
-            return Maps.SelectMany(map => map.Clients).FirstOrDefault(client => client.Tamer?.GeneralHandler == handle);
+            lock (_mapsLock)
+            {
+                return Maps.SelectMany(map => map.Clients).FirstOrDefault(client => client.Tamer?.GeneralHandler == handle);
+            }
         }
 
         public GameClient? FindClientByTamerHandleAndChannel(int handle, long TamerId)
         {
-            return Maps.Where(x => x.Clients.Exists(gameClient => gameClient.TamerId == TamerId))
-                .SelectMany(map => map.Clients)
-                .FirstOrDefault(client => client.Tamer?.GeneralHandler == handle);
+            lock (_mapsLock)
+            {
+                return Maps
+                    .Where(x => x.Clients.Exists(gameClient => gameClient.TamerId == TamerId))
+                    .SelectMany(map => map.Clients)
+                    .FirstOrDefault(client => client.Tamer?.GeneralHandler == handle);
+            }
         }
 
         public void BroadcastForTargetTamers(List<long> targetTamers, byte[] packet)
         {
-            Maps
-                .Where(x => x.Clients.Any(gameClient => targetTamers.Contains(gameClient.TamerId)))
-                .ToList()
-                .ForEach(map => map.BroadcastForTargetTamers(targetTamers, packet));
+            List<GameMap> maps;
+
+            lock (_mapsLock)
+            {
+                maps = Maps
+                    .Where(x => x.Clients.Any(gameClient => targetTamers.Contains(gameClient.TamerId)))
+                    .ToList();
+            }
+
+            foreach (var map in maps)
+            {
+                map.BroadcastForTargetTamers(targetTamers, packet);
+            }
         }
 
         public void BroadcastForTargetTamers(long sourceId, byte[] packet)
         {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == sourceId));
+            GameMap? map;
 
-            map?.BroadcastForTargetTamers(map.TamersView[sourceId], packet);
+            lock (_mapsLock)
+            {
+                map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == sourceId));
+            }
+
+            if (map != null && map.TamersView.ContainsKey(sourceId))
+            {
+                map.BroadcastForTargetTamers(map.TamersView[sourceId], packet);
+            }
         }
 
         public void BroadcastForTamerViewsAndSelf(long sourceId, byte[] packet)
         {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == sourceId));
+            GameMap? map;
+
+            lock (_mapsLock)
+            {
+                map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == sourceId));
+            }
 
             map?.BroadcastForTamerViewsAndSelf(sourceId, packet);
         }
 
         public void BroadcastForTamerViewsAndSelf(GameClient client, byte[] packet)
         {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient =>
-                gameClient.TamerId == client.TamerId && gameClient.Tamer.Channel == client.Tamer.Channel));
+            GameMap? map;
+
+            lock (_mapsLock)
+            {
+                map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient =>
+                    gameClient.TamerId == client.TamerId &&
+                    gameClient.Tamer.Channel == client.Tamer.Channel));
+            }
 
             map?.BroadcastForTamerViewsAndSelf(client.TamerId, packet);
         }
 
         public void BroadcastForTamerViews(GameClient client, byte[] packet)
         {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient =>
-                gameClient.TamerId == client.TamerId && gameClient.Tamer.Channel == client.Tamer.Channel));
+            GameMap? map;
+
+            lock (_mapsLock)
+            {
+                map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient =>
+                    gameClient.TamerId == client.TamerId &&
+                    gameClient.Tamer.Channel == client.Tamer.Channel));
+            }
 
             map?.BroadcastForTamerViewOnly(client.TamerId, packet);
         }
 
         public void AddMapDrop(Drop drop, long tamerId)
         {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            GameMap? map;
+
+            lock (_mapsLock)
+            {
+                map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            }
 
             map?.DropsToAdd.Add(drop);
         }
 
         public void RemoveDrop(Drop drop, long tamerId)
         {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            GameMap? map;
+
+            lock (_mapsLock)
+            {
+                map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            }
 
             map?.RemoveMapDrop(drop);
         }
 
         public Drop? GetDrop(short mapId, int dropHandler, long tamerId)
         {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            GameMap? map;
+
+            lock (_mapsLock)
+            {
+                map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            }
 
             return map?.GetDrop(dropHandler);
         }
 
-        //Mobs
         public bool MobsAttacking(short mapId, long tamerId)
         {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            GameMap? map;
+
+            lock (_mapsLock)
+            {
+                map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            }
 
             return map?.MobsAttacking(tamerId) ?? false;
         }
+
         public bool IMobsAttacking(short mapId, long tamerId)
         {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            GameMap? map;
+
+            lock (_mapsLock)
+            {
+                map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            }
 
             return map?.IMobsAttacking(tamerId) ?? false;
         }
+
         public bool MobsAttacking(short mapId, long tamerId, bool Summon)
         {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            GameMap? map;
+
+            lock (_mapsLock)
+            {
+                map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            }
 
             return map?.MobsAttacking(tamerId) ?? false;
         }
 
         public List<CharacterModel> GetNearbyTamers(short mapId, long tamerId)
         {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            GameMap? map;
 
-            return map?.NearbyTamers(tamerId);
+            lock (_mapsLock)
+            {
+                map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            }
+
+            return map?.NearbyTamers(tamerId) ?? new List<CharacterModel>();
         }
-
-        // ----------------------------------------------------------------------------
 
         public void AddSummonMob(short mapId, SummonMobModel summon, long tamerId)
         {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            GameMap? map;
+
+            lock (_mapsLock)
+            {
+                map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            }
 
             map?.AddMobSumon(summon);
         }
 
         public void AddSummonMobs(short mapId, SummonMobModel summon)
         {
-            var map = Maps.FirstOrDefault(x => x.MapId == mapId);
+            GameMap? map;
+
+            lock (_mapsLock)
+            {
+                map = Maps.FirstOrDefault(x => x.MapId == mapId);
+            }
 
             map?.AddMob(summon);
         }
+
         public void AddSummonMobs(SummonMobModel summon)
         {
-            foreach (var map in Maps)
+            List<GameMap> maps;
+
+            lock (_mapsLock)
             {
-                map.AddMob(summon);  // Add the summon to every map
+                maps = Maps.ToList();
+            }
+
+            foreach (var map in maps)
+            {
+                map.AddMob(summon);
             }
         }
+
         public void AddMobs(short mapId, MobConfigModel mob, long tamerId)
         {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            GameMap? map;
+
+            lock (_mapsLock)
+            {
+                map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            }
 
             map?.AddMob(mob);
         }
 
-        // ----------------------------------------------------------------------------
-
         public MobConfigModel? GetMobByHandler(short mapId, int handler, long tamerId)
         {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            GameMap? map;
+
+            lock (_mapsLock)
+            {
+                map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            }
 
             if (map == null)
+            {
                 return null;
+            }
 
             return map.Mobs.FirstOrDefault(x => x.GeneralHandler == handler);
         }
 
         public SummonMobModel? GetMobByHandler(short mapId, int handler, bool summon, long tamerId)
         {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            GameMap? map;
+
+            lock (_mapsLock)
+            {
+                map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            }
 
             if (map == null)
+            {
                 return null;
+            }
 
             return map.SummonMobs.FirstOrDefault(x => x.GeneralHandler == handler);
         }
 
         public DigimonModel? GetEnemyByHandler(short mapId, int handler, long tamerId)
         {
-            return Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId))?
-                .ConnectedTamers.Select(x => x.Partner).FirstOrDefault(x => x.GeneralHandler == handler);
-        }
+            GameMap? map;
 
-        // ----------------------------------------------------------------------------
+            lock (_mapsLock)
+            {
+                map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            }
+
+            return map?.ConnectedTamers.Select(x => x.Partner).FirstOrDefault(x => x.GeneralHandler == handler);
+        }
 
         public List<MobConfigModel> GetMobsNearbyPartner(Location location, int range, long tamerId)
         {
-            var targetMap = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            GameMap? targetMap;
+
+            lock (_mapsLock)
+            {
+                targetMap = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            }
 
             if (targetMap == null)
-                return default;
+            {
+                return new List<MobConfigModel>();
+            }
 
             var originX = location.X;
             var originY = location.Y;
 
             return GetTargetMobs(targetMap.Mobs.Where(x => x.Alive).ToList(), originX, originY, range)
-                .DistinctBy(x => x.Id).ToList();
+                .DistinctBy(x => x.Id)
+                .ToList();
         }
 
-        public List<MobConfigModel> GetMobsNearbyPartnerByHandler(Location location, int handler, int range,
-            long tamerId)
+        public List<MobConfigModel> GetMobsNearbyPartnerByHandler(Location location, int handler, int range, long tamerId)
         {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            GameMap? map;
+
+            lock (_mapsLock)
+            {
+                map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            }
 
             if (map == null)
-                return null;
+            {
+                return new List<MobConfigModel>();
+            }
 
             var targetMob = map.Mobs.FirstOrDefault(x => x.GeneralHandler == handler);
 
             if (targetMob == null)
-                return default;
+            {
+                return new List<MobConfigModel>();
+            }
 
             var originX = targetMob.CurrentLocation.X;
             var originY = targetMob.CurrentLocation.Y;
@@ -643,7 +840,6 @@ namespace DigitalWorldOnline.GameHost
             var areaMobs = new List<MobConfigModel>();
 
             areaMobs.Add(targetMob);
-
             areaMobs.AddRange(GetTargetMobs(map.Mobs.Where(x => x.Alive).ToList(), originX, originY, range / 5));
 
             return areaMobs.DistinctBy(x => x.Id).ToList();
@@ -651,22 +847,31 @@ namespace DigitalWorldOnline.GameHost
 
         public List<MobConfigModel> GetMobsNearbyTargetMob(short mapId, int handler, int range, long tamerId)
         {
-            var targetMap = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            GameMap? targetMap;
+
+            lock (_mapsLock)
+            {
+                targetMap = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            }
 
             if (targetMap == null)
-                return default;
+            {
+                return new List<MobConfigModel>();
+            }
 
             var originMob = targetMap.Mobs.FirstOrDefault(x => x.GeneralHandler == handler);
 
             if (originMob == null)
-                return default;
+            {
+                return new List<MobConfigModel>();
+            }
 
             var originX = originMob.CurrentLocation.X;
             var originY = originMob.CurrentLocation.Y;
 
             var targetMobs = new List<MobConfigModel>();
-            targetMobs.Add(originMob);
 
+            targetMobs.Add(originMob);
             targetMobs.AddRange(GetTargetMobs(targetMap.Mobs.Where(x => x.Alive).ToList(), originX, originY, range));
 
             return targetMobs.DistinctBy(x => x.Id).ToList();
@@ -692,57 +897,80 @@ namespace DigitalWorldOnline.GameHost
             return targetMobs;
         }
 
-        // ----------------------------------------------------------------------------
-
         public List<SummonMobModel> GetMobsNearbyPartner(Location location, int range, bool Summon, long tamerId)
         {
-            var targetMap = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            GameMap? targetMap;
+
+            lock (_mapsLock)
+            {
+                targetMap = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            }
 
             if (targetMap == null)
-                return default;
+            {
+                return new List<SummonMobModel>();
+            }
 
             var originX = location.X;
             var originY = location.Y;
 
             return GetTargetMobs(targetMap.SummonMobs.Where(x => x.Alive).ToList(), originX, originY, range)
-                .DistinctBy(x => x.Id).ToList();
+                .DistinctBy(x => x.Id)
+                .ToList();
         }
 
-        public List<SummonMobModel> GetMobsNearbyTargetMob(short mapId, int handler, int range, bool Summon,
-            long tamerId)
+        public List<SummonMobModel> GetMobsNearbyTargetMob(short mapId, int handler, int range, bool Summon, long tamerId)
         {
-            var targetMap = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            GameMap? targetMap;
+
+            lock (_mapsLock)
+            {
+                targetMap = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            }
 
             if (targetMap == null)
-                return default;
+            {
+                return new List<SummonMobModel>();
+            }
 
             var originMob = targetMap.SummonMobs.FirstOrDefault(x => x.GeneralHandler == handler);
 
             if (originMob == null)
-                return default;
+            {
+                return new List<SummonMobModel>();
+            }
 
             var originX = originMob.CurrentLocation.X;
             var originY = originMob.CurrentLocation.Y;
 
             var targetMobs = new List<SummonMobModel>();
-            targetMobs.Add(originMob);
 
-            targetMobs.AddRange(GetTargetMobs(targetMap.SummonMobs.Where(x => x.Alive).ToList(), originX, originY,
-                range));
+            targetMobs.Add(originMob);
+            targetMobs.AddRange(GetTargetMobs(targetMap.SummonMobs.Where(x => x.Alive).ToList(), originX, originY, range));
 
             return targetMobs.DistinctBy(x => x.Id).ToList();
         }
-        public IMob GetNearestIMobToTarget(short mapId, int handler, int range, long tamerId)
+
+        public IMob? GetNearestIMobToTarget(short mapId, int handler, int range, long tamerId)
         {
-            var targetMap = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            GameMap? targetMap;
+
+            lock (_mapsLock)
+            {
+                targetMap = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            }
 
             if (targetMap == null)
+            {
                 return null;
+            }
 
             var originMob = targetMap.IMobs.FirstOrDefault(x => x.GeneralHandler == handler);
 
             if (originMob == null)
+            {
                 return null;
+            }
 
             var originX = originMob.CurrentLocation.X;
             var originY = originMob.CurrentLocation.Y;
@@ -750,15 +978,16 @@ namespace DigitalWorldOnline.GameHost
             return GetNearestIMob(targetMap.IMobs.Where(x => x.Alive).ToList(), originX, originY, range);
         }
 
-        public static IMob GetNearestIMob(List<IMob> mobs, int originX, int originY, int range)
+        public static IMob? GetNearestIMob(List<IMob> mobs, int originX, int originY, int range)
         {
-            IMob nearestMob = null;
+            IMob? nearestMob = null;
             double minDistance = double.MaxValue;
 
             foreach (var mob in mobs)
             {
                 var mobX = mob.CurrentLocation.X;
                 var mobY = mob.CurrentLocation.Y;
+
                 var distance = CalculateDistance(originX, originY, mobX, mobY);
 
                 if (distance <= range && distance < minDistance)
@@ -770,6 +999,7 @@ namespace DigitalWorldOnline.GameHost
 
             return nearestMob;
         }
+
         public static List<SummonMobModel> GetTargetMobs(List<SummonMobModel> mobs, int originX, int originY, int range)
         {
             var targetMobs = new List<SummonMobModel>();
@@ -789,48 +1019,73 @@ namespace DigitalWorldOnline.GameHost
 
             return targetMobs;
         }
+
         public List<IMob> GetIMobsNearbyPartner(Location location, int range, long tamerId)
         {
-            var targetMap = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            GameMap? targetMap;
+
+            lock (_mapsLock)
+            {
+                targetMap = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            }
 
             if (targetMap == null)
-                return default;
+            {
+                return new List<IMob>();
+            }
 
             var originX = location.X;
             var originY = location.Y;
 
             return GetTargetIMobs(targetMap.IMobs.Where(x => x.Alive).ToList(), originX, originY, range)
-                .DistinctBy(x => x.Id).ToList();
+                .DistinctBy(x => x.Id)
+                .ToList();
         }
 
         public List<IMob> GetIMobsNearbyTargetMob(short mapId, int handler, int range, long tamerId)
         {
-            var targetMap = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            GameMap? targetMap;
+
+            lock (_mapsLock)
+            {
+                targetMap = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            }
 
             if (targetMap == null)
-                return default;
+            {
+                return new List<IMob>();
+            }
 
             var originMob = targetMap.IMobs.FirstOrDefault(x => x.GeneralHandler == handler);
 
             if (originMob == null)
-                return default;
+            {
+                return new List<IMob>();
+            }
 
             var originX = originMob.CurrentLocation.X;
             var originY = originMob.CurrentLocation.Y;
 
             var targetMobs = new List<IMob>();
-            targetMobs.Add(originMob);
 
+            targetMobs.Add(originMob);
             targetMobs.AddRange(GetTargetIMobs(targetMap.IMobs.Where(x => x.Alive).ToList(), originX, originY, range));
 
             return targetMobs.DistinctBy(x => x.Id).ToList();
         }
+
         public IMob? GetIMobByHandler(short mapId, int handler, long tamerId)
         {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            GameMap? map;
+
+            lock (_mapsLock)
+            {
+                map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            }
 
             return map?.IMobs.FirstOrDefault(x => x.GeneralHandler == handler);
         }
+
         public static List<IMob> GetTargetIMobs(List<IMob> mobs, int originX, int originY, int range)
         {
             var targetMobs = new List<IMob>();
@@ -851,11 +1106,14 @@ namespace DigitalWorldOnline.GameHost
             return targetMobs;
         }
 
-        // ----------------------------------------------------------------------------
-
         public bool EnemiesAttacking(short mapId, long partnerId, long tamerId)
         {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            GameMap? map;
+
+            lock (_mapsLock)
+            {
+                map = Maps.FirstOrDefault(x => x.Clients.Exists(gameClient => gameClient.TamerId == tamerId));
+            }
 
             return map?.PlayersAttacking(partnerId) ?? false;
         }
@@ -864,7 +1122,6 @@ namespace DigitalWorldOnline.GameHost
         {
             return;
 
-            // TODO: discord in the future in needed
             var payload = new
             {
                 message = message,
@@ -926,8 +1183,6 @@ namespace DigitalWorldOnline.GameHost
             }
         }
 
-        // ----------------------------------------------------------------------------
-
         private static double CalculateDistance(int x1, int y1, int x2, int y2)
         {
             var deltaX = x2 - x1;
@@ -936,9 +1191,6 @@ namespace DigitalWorldOnline.GameHost
             return Math.Sqrt(deltaX * deltaX + deltaY * deltaY);
         }
 
-        // ----------------------------------------------------------------------------
-
-        // Background loop that periodically syncs maps and map objects from the database.
         private async Task SyncMapsAndObjectsLoop(CancellationToken cancellationToken)
         {
             try
@@ -947,13 +1199,11 @@ namespace DigitalWorldOnline.GameHost
                 {
                     try
                     {
-                        // These methods already check internal timers to avoid frequent DB calls.
                         await SearchNewMaps(cancellationToken);
                         await GetMapObjects(cancellationToken);
                     }
                     catch (OperationCanceledException)
                     {
-                        // cancellation requested, break out cleanly
                         break;
                     }
                     catch (Exception ex)
@@ -961,8 +1211,14 @@ namespace DigitalWorldOnline.GameHost
                         _logger.Error(ex, "[SYNC LOOP] Error while syncing maps or map objects");
                     }
 
-                    // Wait a bit before next sync to avoid tight loop; the called methods also control frequency
-                    try { await Task.Delay(1000, cancellationToken); } catch (OperationCanceledException) { break; }
+                    try
+                    {
+                        await Task.Delay(1000, cancellationToken);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
                 }
             }
             catch (Exception ex)

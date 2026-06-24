@@ -365,11 +365,30 @@ namespace DigitalWorldOnline.Character
 
                                 var deletedCharacter = await _sender.Send(new DeleteCharacterCommand(client.AccountId, position));
 
-                                client.Send(new CharacterDeletedPacket(deletedCharacter).Serialize());
-
-                                _logger.Information(
-                                    $"[Character Deletion] Character '{character.Name}' (Position: {position}) successfully deleted from AccountId: {client.AccountId}."
+                                var checkCharacter = _mapper.Map<CharacterModel>(
+                                    await _sender.Send(new CharacterByAccountIdAndPositionQuery(client.AccountId, position))
                                 );
+
+                                if (deletedCharacter == DeleteCharacterResultEnum.Deleted && checkCharacter == null)
+                                {
+                                    client.Send(new CharacterDeletedPacket(DeleteCharacterResultEnum.Deleted).Serialize());
+
+                                    _logger.Information(
+                                        $"[Character Deletion] Character '{character.Name}' (Position: {position}) successfully deleted from AccountId: {client.AccountId}."
+                                    );
+                                }
+                                else
+                                {
+                                    _logger.Error(
+                                        "[Character Deletion] Delete command returned {Result}, but character still exists after deletion. AccountId={AccountId}, Position={Position}, CharacterStillExists={StillExists}",
+                                        deletedCharacter,
+                                        client.AccountId,
+                                        position,
+                                        checkCharacter != null
+                                    );
+
+                                    client.Send(new CharacterDeletedPacket(DeleteCharacterResultEnum.Error).Serialize());
+                                }
                             }
                             else
                             {

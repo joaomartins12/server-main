@@ -1,4 +1,6 @@
-﻿using DigitalWorldOnline.Commons.Models.Character;
+﻿using System;
+using System.Linq;
+using DigitalWorldOnline.Commons.Models.Character;
 using DigitalWorldOnline.Commons.Models.Map;
 using DigitalWorldOnline.Commons.Models.Mechanics;
 using DigitalWorldOnline.Commons.Utils;
@@ -10,310 +12,423 @@ namespace DigitalWorldOnline.Commons.Packets.GameServer
     {
         private const int PacketNumber = 1003;
 
-        /// <summary>
-        /// Initial information for character spawn.
-        /// </summary>
-        /// <param name="character">The tamer that is trying to log-in</param>
         public InitialInfoPacket(CharacterModel character, GameParty? party)
         {
             Type(PacketNumber);
+
+            Console.WriteLine($"[INIT_PACKET_V8] Writing InitialInfoPacket for {character.Id}:{character.Name} Map={character.Location.MapId} Ch={character.Channel}");
+
             WriteInt(1);
+
             WriteInt(character.Location.X);
             WriteInt(character.Location.Y);
+
             WriteInt(character.GeneralHandler);
+
             WriteInt(character.Model.GetHashCode());
+
             WriteString(character.Name);
+
             WriteInt64(character.CurrentExperience * 100);
+
             WriteShort(character.Level);
+
             WriteInt(character.HP);
             WriteInt(character.DS);
+
             WriteInt(character.CurrentHp);
             WriteInt(character.CurrentDs);
+
             WriteInt(CharacterModel.Fatigue);
+
             WriteInt(character.AT);
             WriteInt(character.DE);
             WriteInt(character.MS);
+
             WriteBytes(character.Equipment.ToArray());
+
             WriteBytes(character.ChipSets.ToArray());
+
             WriteBytes(character.Digivice.ToArray());
+
             WriteBytes(character.TamerSkill.ToArray());
+
             WriteBytes(character.Progress.ToArray());
+
             WriteInt(character.Incubator.EggId);
+
             WriteInt(character.Incubator.HatchLevel);
+
             WriteInt(-1); // Egg TradeLimitTime
+
             WriteInt(character.Incubator.BackupDiskId);
+
             WriteInt(-1); // BackupDisk TradeLimitTime
 
-            WriteShort((short)character.BuffList.ActiveBuffs.Count);
-            foreach (var buff in character.BuffList.ActiveBuffs.ToList())
-            {
-                WriteShort((short)buff.BuffId);
-                WriteShort((short)buff.TypeN);
-                WriteInt(UtilitiesFunctions.RemainingTimeSeconds(buff.RemainingSeconds));
-                WriteInt(buff.SkillId);
-            }
+            WriteTamerBuffs(character);
 
             WriteByte(character.DigimonSlots);
-            WriteInt(character.Partner.GeneralHandler);
-            WriteInt(character.Partner.CurrentType);
-            WriteString(character.Partner.Name);
-            WriteByte((byte)character.Partner.HatchGrade);
-            WriteShort(character.Partner.Size);
-            WriteInt64(character.Partner.CurrentExperience * 100);
-            WriteInt64(character.Partner.TranscendenceExperience); //TODO: Transcend EXP
-            WriteShort(character.Partner.Level);
-            WriteInt(character.Partner.HP);
-            WriteInt(character.Partner.DS);
-            WriteInt(character.Partner.DE);
-            WriteInt(character.Partner.AT);
-            WriteInt(character.Partner.CurrentHp);
-            WriteInt(character.Partner.CurrentDs);
-            WriteInt(character.Partner.FS);
-            WriteInt(0); //?
-            WriteInt(character.Partner.EV);
-            WriteInt(character.Partner.CC);
-            WriteInt(character.Partner.MS);
-            WriteInt(character.Partner.AS);
-            WriteInt(0); //? 
-            WriteInt(character.Partner.HT);
-            WriteInt(0); //?
-            WriteInt(0); //?
-            WriteInt(character.Partner.AR);
-            WriteInt(character.Partner.BL);
-            WriteInt(character.Partner.BaseType);
 
-            WriteByte((byte)character.Partner.Evolutions.Count);
+            WritePartnerDigimon(character);
 
-            //TODO: teste com foreach
-            for (int i = 0; i < character.Partner.Evolutions.Count; i++)
-            {
-                var form = character.Partner.Evolutions[i];
-                WriteBytes(form.ToArray());
-            }
+            WriteActiveDigimonsSafe(character);
 
-            WriteShort(character.Partner.Digiclone.CloneLevel);
-            WriteShort(character.Partner.Digiclone.ATValue);
-            WriteShort(character.Partner.Digiclone.BLValue);
-            WriteShort(character.Partner.Digiclone.CTValue);
-            WriteShort(0); //DE Value (not implemented on client-side)
-            WriteShort(character.Partner.Digiclone.EVValue);
-            WriteShort(0); //HT Value (not implemented on client-side)
-            WriteShort(character.Partner.Digiclone.HPValue);
-            WriteShort(character.Partner.Digiclone.ATLevel);
-            WriteShort(character.Partner.Digiclone.BLLevel);
-            WriteShort(character.Partner.Digiclone.CTLevel);
-            WriteShort(0); //DE Level (not implemented on client-side)
-            WriteShort(character.Partner.Digiclone.EVLevel);
-            WriteShort(0); //HT Level (not implemented on client-side)
-            WriteShort(character.Partner.Digiclone.HPLevel);
+            WriteByte(99); // End active digimon loop
 
-            WriteShort((short)character.Partner.BuffList.ActiveBuffs.Count);
-            foreach (var buff in character.Partner.BuffList.ActiveBuffs)
-            {
-                WriteShort((short)buff.BuffId);
-                WriteShort((short)buff.TypeN);
-                WriteInt(UtilitiesFunctions.RemainingTimeSeconds(buff.RemainingSeconds));
-                WriteInt(buff.SkillId);
-            }
-
-            WriteShort(character.Partner.AttributeExperience.Data);
-            WriteShort(character.Partner.AttributeExperience.Vaccine);
-            WriteShort(character.Partner.AttributeExperience.Virus);
-
-            WriteShort(character.Partner.AttributeExperience.Ice);
-            WriteShort(character.Partner.AttributeExperience.Water);
-            WriteShort(character.Partner.AttributeExperience.Fire);
-            WriteShort(character.Partner.AttributeExperience.Land);
-            WriteShort(character.Partner.AttributeExperience.Wind);
-            WriteShort(character.Partner.AttributeExperience.Wood);
-            WriteShort(character.Partner.AttributeExperience.Light);
-            WriteShort(character.Partner.AttributeExperience.Dark);
-            WriteShort(character.Partner.AttributeExperience.Thunder);
-            WriteShort(character.Partner.AttributeExperience.Steel);
-
-            WriteInt(0); //nUID (não é mais utilizado?)
-            WriteByte(0); //TODO: CashSkillCount (se passar acima de 0, informar o objeto)
-
-            foreach (var digimon in character.ActiveDigimons)
-            {
-                WriteByte(digimon.Slot);
-                WriteUInt(digimon.GeneralHandler);
-                WriteInt(digimon.BaseType);
-                WriteString(digimon.Name);
-                WriteByte((byte)digimon.HatchGrade);
-                WriteShort(digimon.Size);
-                WriteInt64(digimon.CurrentExperience * 100);
-                WriteInt64(digimon.TranscendenceExperience); //Transcend EXP
-                WriteShort(digimon.Level);
-                WriteInt(digimon.HP);
-                WriteInt(digimon.DS);
-                WriteInt(digimon.DE);
-                WriteInt(digimon.AT);
-                WriteInt(digimon.CurrentHp);
-                WriteInt(digimon.CurrentDs);
-                WriteInt(digimon.FS);
-                WriteInt(0); //?
-                WriteInt(digimon.EV);
-                WriteInt(digimon.CC);
-                WriteInt(digimon.MS);
-                WriteInt(digimon.AS);
-                WriteInt(0); //? 
-                WriteInt(digimon.HT);
-                WriteInt(0); //?
-                WriteInt(0); //?
-                WriteInt(0); //?
-                WriteInt(digimon.BL);
-                WriteInt(digimon.BaseType);
-
-                WriteByte((byte)digimon.Evolutions.Count);
-                //TODO: teste com foreach
-                for (int i = 0; i < digimon.Evolutions.Count; i++)
-                {
-                    var form = digimon.Evolutions[i];
-                    WriteBytes(form.ToArray());
-                }
-
-                WriteShort(digimon.Digiclone.CloneLevel);
-                WriteShort(digimon.Digiclone.ATValue);
-                WriteShort(digimon.Digiclone.BLValue);
-                WriteShort(digimon.Digiclone.CTValue);
-                WriteShort(0); //DE Value (not implemented on client-side)
-                WriteShort(digimon.Digiclone.EVValue);
-                WriteShort(0); //HT Value (not implemented on client-side)
-                WriteShort(digimon.Digiclone.HPValue);
-                WriteShort(digimon.Digiclone.ATLevel);
-                WriteShort(digimon.Digiclone.BLLevel);
-                WriteShort(digimon.Digiclone.CTLevel);
-                WriteShort(0); //DE Level (not implemented on client-side)
-                WriteShort(digimon.Digiclone.EVLevel);
-                WriteShort(0); //HT Level (not implemented on client-side)
-                WriteShort(digimon.Digiclone.HPLevel);
-
-                WriteShort(digimon.AttributeExperience.Data);
-                WriteShort(digimon.AttributeExperience.Vaccine);
-                WriteShort(digimon.AttributeExperience.Virus);
-
-                WriteShort(digimon.AttributeExperience.Ice);
-                WriteShort(digimon.AttributeExperience.Water);
-                WriteShort(digimon.AttributeExperience.Fire);
-                WriteShort(digimon.AttributeExperience.Land);
-                WriteShort(digimon.AttributeExperience.Wind);
-                WriteShort(digimon.AttributeExperience.Wood);
-                WriteShort(digimon.AttributeExperience.Light);
-                WriteShort(digimon.AttributeExperience.Dark);
-                WriteShort(digimon.AttributeExperience.Thunder);
-                WriteShort(digimon.AttributeExperience.Steel);
-
-                WriteInt(16404); //16404
-                WriteByte(0);
-            }
-
-            WriteByte(99); //Define fim do loop de load dos digimons
+            // COMPAT_487:
+            // O client lê um int extra antes do CurrentChannel.
             WriteInt(0);
+
             WriteInt(character.Channel);
+
             WriteBytes(character.SerializeMapRegion());
+
             WriteInt(character.DigimonArchive.Slots);
 
-            if (party != null)
-            {
-                WriteUInt((uint)party.Id);
-
-                WriteInt((int)party.LootType); //loot type
-                WriteByte((byte)party.LootFilter); //rare rate
-                WriteByte(0); //rare grade
-                WriteByte((byte)(party.LeaderSlot)); //Party leader slot
-
-                foreach (var member in party.Members.Where(x => x.Value.Id != character.Id))
-                {
-                    WriteByte(member.Key);
-                    if (character.Channel == member.Value.Channel &&
-                        character.Location.MapId == member.Value.Location.MapId)
-                    {
-                        WriteInt(member.Value.GeneralHandler);
-                        WriteInt(member.Value.Partner.GeneralHandler);
-                    }
-                    else
-                    {
-                        WriteInt(0);
-                        WriteInt(0);
-                    }
-
-                    WriteInt(member.Value.Model.GetHashCode());
-                    WriteShort(member.Value.Level);
-                    WriteString(member.Value.Name);
-
-                    WriteInt(member.Value.Partner.CurrentType);
-                    WriteShort(member.Value.Partner.Level);
-                    WriteString(member.Value.Partner.Name);
-
-                    WriteInt(member.Value.Location.MapId);
-                    WriteInt(member.Value.Channel);
-                }
-
-                WriteByte(99);
-            }
-            else
-            {
-                // PartyId
-                WriteInt(0);
-
-                // LootType
-                WriteInt(0);
-
-                // LootFilter
-                WriteByte(0);
-
-                // LeaderSlot
-                WriteByte(0);
-
-                // End of party members list
-                WriteByte(99);
-            }
+            WritePartyInfo(character, party);
 
             WriteShort(character.CurrentTitle);
 
-            //ItemCooldown(max 32)
+            // ItemCooldown max 32
             for (int i = 0; i < 32; i++)
+            {
                 WriteInt(0);
+            }
 
-            WriteInt(0); //versão do game
-            WriteInt(2); //nWorkDayHistory (total de dias evento login diario)
-            WriteInt(0); //nTodayAttendanceTimeTS (tempo restante do dia atual)
-            WriteInt(0); //Id Boss vivo no mapa atual (já é passado no ComplementarInfo)
-            WriteByte(0); //PC Bang (???)
+            WriteInt(0); // Game version / sync option
 
-            //ConsignedShop
+            WriteInt(2); // nWorkDayHistory
+
+            WriteInt(0); // nTodayAttendanceTimeTS
+
+            WriteInt(0); // BossGenInfo terminator: nBossMonsterType = 0
+
+            WriteByte(0); // PC Bang
+
+            WriteConsignedShop(character);
+
+            WriteInt(0); // clientOption
+
+            WriteInt(0); // Achievement rank
+
+            WriteByte(0); // hatch minigame already played
+
+            WriteShort(0); // minigame success count
+
+            WriteTamerActiveSkills(character);
+
+            WriteByte(0); // chat block / restrict flag
+
+            WriteByte(0); // master match
+
+            if (character.DeckBuffId == null)
+            {
+                WriteByte(0);
+            }
+            else
+            {
+                WriteInt((int)character.DeckBuffId);
+            }
+
+            WriteByte(0); // Megaphone ban
+
+            WriteInt(0);
+
+            WriteBytes(new byte[29]);
+
+            Console.WriteLine("[INIT_PACKET_V8] InitialInfoPacket write complete");
+        }
+
+        private void WriteTamerBuffs(CharacterModel character)
+        {
+            var buffs = character.BuffList.ActiveBuffs.ToList();
+
+            WriteShort((short)buffs.Count);
+
+            foreach (var buff in buffs)
+            {
+                // Client sPostBuff usa u4/u4/u4/u4.
+                WriteUInt((uint)buff.BuffId);
+
+                WriteUInt((uint)buff.TypeN);
+
+                WriteUInt((uint)UtilitiesFunctions.RemainingTimeSeconds(buff.RemainingSeconds));
+
+                WriteUInt((uint)buff.SkillId);
+            }
+        }
+
+        private void WritePartnerDigimon(CharacterModel character)
+        {
+            var partner = character.Partner;
+
+            WriteInt(partner.GeneralHandler);
+
+            WriteInt(partner.CurrentType);
+
+            WriteString(partner.Name);
+
+            WriteByte((byte)partner.HatchGrade);
+
+            WriteShort(partner.Size);
+
+            WriteInt64(partner.CurrentExperience * 100);
+
+            // COMPAT_487:
+            // O client lê este u8 como ExpPt2.
+            WriteInt64(partner.TranscendenceExperience);
+
+            WriteShort(partner.Level);
+
+            WriteInt(partner.HP);
+            WriteInt(partner.DS);
+            WriteInt(partner.DE);
+            WriteInt(partner.AT);
+
+            WriteInt(partner.CurrentHp);
+            WriteInt(partner.CurrentDs);
+
+            WriteInt(partner.FS);
+
+            WriteInt(0);
+
+            WriteInt(partner.EV);
+            WriteInt(partner.CC);
+            WriteInt(partner.MS);
+            WriteInt(partner.AS);
+
+            WriteInt(0);
+
+            WriteInt(partner.HT);
+
+            WriteInt(0);
+            WriteInt(0);
+
+            WriteInt(partner.AR);
+            WriteInt(partner.BL);
+
+            WriteInt(partner.BaseType);
+
+            WriteByte((byte)partner.Evolutions.Count);
+
+            for (int i = 0; i < partner.Evolutions.Count; i++)
+            {
+                var form = partner.Evolutions[i];
+
+                WriteBytes(form.ToArray());
+            }
+
+            WriteShort(partner.Digiclone.CloneLevel);
+
+            WriteShort(partner.Digiclone.ATValue);
+            WriteShort(partner.Digiclone.BLValue);
+            WriteShort(partner.Digiclone.CTValue);
+
+            WriteShort(0); // DE Value - not implemented client-side
+
+            WriteShort(partner.Digiclone.EVValue);
+
+            WriteShort(0); // HT Value - not implemented client-side
+
+            WriteShort(partner.Digiclone.HPValue);
+
+            WriteShort(partner.Digiclone.ATLevel);
+            WriteShort(partner.Digiclone.BLLevel);
+            WriteShort(partner.Digiclone.CTLevel);
+
+            WriteShort(0); // DE Level - not implemented client-side
+
+            WriteShort(partner.Digiclone.EVLevel);
+
+            WriteShort(0); // HT Level - not implemented client-side
+
+            WriteShort(partner.Digiclone.HPLevel);
+
+            WritePartnerBuffs(character);
+
+            WriteShort(partner.AttributeExperience.Data);
+            WriteShort(partner.AttributeExperience.Vaccine);
+            WriteShort(partner.AttributeExperience.Virus);
+            WriteShort(partner.AttributeExperience.Ice);
+            WriteShort(partner.AttributeExperience.Water);
+            WriteShort(partner.AttributeExperience.Fire);
+            WriteShort(partner.AttributeExperience.Land);
+            WriteShort(partner.AttributeExperience.Wind);
+            WriteShort(partner.AttributeExperience.Wood);
+            WriteShort(partner.AttributeExperience.Light);
+            WriteShort(partner.AttributeExperience.Dark);
+            WriteShort(partner.AttributeExperience.Thunder);
+            WriteShort(partner.AttributeExperience.Steel);
+
+            // Client Data_PostLoad::sDATA::s_nUID é u4.
+            WriteUInt(0); // Partner nUID
+
+            WriteByte(0); // Partner CashSkillCount
+        }
+
+        private void WritePartnerBuffs(CharacterModel character)
+        {
+            var buffs = character.Partner.BuffList.ActiveBuffs.ToList();
+
+            WriteShort((short)buffs.Count);
+
+            foreach (var buff in buffs)
+            {
+                // COMPAT_487 Partner Buff:
+                // u4 BuffCode
+                // u4 BuffEndTS
+                // u4 SkillCode
+                // NÃO escreve TypeN aqui.
+                WriteUInt((uint)buff.BuffId);
+
+                WriteUInt((uint)UtilitiesFunctions.RemainingTimeSeconds(buff.RemainingSeconds));
+
+                WriteUInt((uint)buff.SkillId);
+            }
+        }
+
+        private void WriteActiveDigimonsSafe(CharacterModel character)
+        {
+            // Temporariamente não enviamos Digimons ativos extra.
+            // O Partner já foi enviado acima.
+            // O próximo byte escrito depois deste método é 99.
+            //
+            // O client correto deve mostrar:
+            // [RECV_INIT] First active digimon slot marker=99
+
+            var activeDigimons = character.ActiveDigimons
+                .Where(x => x != null)
+                .Select(x => $"{x.Id}:{x.Name}:Slot={x.Slot}")
+                .ToList();
+
+            if (activeDigimons.Any())
+            {
+                Console.WriteLine("[INIT_PACKET_V8] ActiveDigimons skipped for packet alignment test: " +
+                                  string.Join(", ", activeDigimons));
+            }
+            else
+            {
+                Console.WriteLine("[INIT_PACKET_V8] No extra ActiveDigimons to send.");
+            }
+        }
+
+        private void WritePartyInfo(CharacterModel character, GameParty? party)
+        {
+            if (party == null)
+            {
+                WriteUInt(0); // Party Id
+
+                WriteUInt(0); // Crop/Loot type
+
+                WriteUInt(0); // Rare Rate
+
+                // IMPORTANTE:
+                // O client lê m_nDispRareGrade como u4/int, não byte.
+                // Antes estava WriteByte(0), e isso fazia o 99 cair no sítio errado.
+                WriteUInt(0); // Display Rare Grade
+
+                WriteByte(0); // Master slot
+
+                // COMPAT_487:
+                // Client lê u2 antes do primeiro nSlotNo.
+                WriteShort(0);
+
+                WriteByte(99); // End party member loop
+
+                return;
+            }
+
+            WriteUInt((uint)party.Id);
+
+            WriteUInt((uint)party.LootType); // Crop/Loot type
+
+            WriteUInt((uint)party.LootFilter); // Rare Rate
+
+            // IMPORTANTE:
+            // Display Rare Grade também é u4/int no client.
+            WriteUInt(0);
+
+            WriteByte((byte)party.LeaderSlot); // Master slot
+
+            // COMPAT_487:
+            // Client lê u2 antes do primeiro nSlotNo.
+            WriteShort(0);
+
+            foreach (var member in party.Members
+                         .Where(x => x.Value.Id != character.Id)
+                         .OrderBy(x => x.Key)
+                         .Take(8))
+            {
+                WriteByte(member.Key); // SlotNo
+
+                if (character.Channel == member.Value.Channel &&
+                    character.Location.MapId == member.Value.Location.MapId)
+                {
+                    WriteUInt((uint)member.Value.GeneralHandler);
+                    WriteUInt((uint)member.Value.Partner.GeneralHandler);
+                }
+                else
+                {
+                    WriteUInt(0);
+                    WriteUInt(0);
+                }
+
+                WriteInt(member.Value.Model.GetHashCode());
+
+                WriteShort(member.Value.Level);
+
+                WriteString(member.Value.Name);
+
+                WriteInt(member.Value.Partner.CurrentType);
+
+                WriteShort(member.Value.Partner.Level);
+
+                WriteString(member.Value.Partner.Name);
+
+                WriteInt(member.Value.Location.MapId);
+
+                WriteInt(member.Value.Channel);
+            }
+
+            WriteByte(99); // End party member loop
+        }
+
+        private void WriteConsignedShop(CharacterModel character)
+        {
             if (character.ConsignedShop != null)
             {
                 WriteInt(character.ConsignedShop.Location.MapId);
-                WriteInt(character.ConsignedShop.Channel); //Channel
-                WriteInt(character.ConsignedShop.Location.X); //X
-                WriteInt(character.ConsignedShop.Location.Y); //Y
-                WriteInt(character.ConsignedShop.ItemId); //itemid
+                WriteInt(character.ConsignedShop.Channel);
+                WriteInt(character.ConsignedShop.Location.X);
+                WriteInt(character.ConsignedShop.Location.Y);
+                WriteInt(character.ConsignedShop.ItemId);
             }
             else
-                WriteInt(0);
-
-            WriteInt(0); //clientOption (aparenta ter relação com o tutorial)
-            WriteInt(0); //Achievement rank
-
-            WriteByte(0); //hatch atual já rodou minigame
-            WriteShort(0); //total de sucesso do minigame (TODO: externalizar % por tentativa bem sucedida)
-
-            var Buffs = character.ActiveSkill.Where(x =>
-                x.Type == Enums.ClientEnums.TamerSkillTypeEnum.Normal && x.SkillId > 0 &&
-                x.RemainingCooldownSeconds > 0).ToList();
-
-            if (Buffs.Any())
             {
-                WriteByte((byte)Buffs.Count);
-                foreach (var buff in Buffs)
-                {
-                    WriteInt(buff.SkillId);
+                WriteInt(0);
+            }
+        }
 
-                    if (buff.RemainingCooldownSeconds > 0)
+        private void WriteTamerActiveSkills(CharacterModel character)
+        {
+            var normalSkills = character.ActiveSkill
+                .Where(x =>
+                    x.Type == Enums.ClientEnums.TamerSkillTypeEnum.Normal &&
+                    x.SkillId > 0 &&
+                    x.RemainingCooldownSeconds > 0)
+                .ToList();
+
+            if (normalSkills.Any())
+            {
+                WriteByte((byte)normalSkills.Count);
+
+                foreach (var skill in normalSkills)
+                {
+                    WriteInt(skill.SkillId);
+
+                    if (skill.RemainingCooldownSeconds > 0)
                     {
-                        WriteInt(UtilitiesFunctions.RemainingTimeSeconds(buff.RemainingCooldownSeconds));
+                        WriteInt(UtilitiesFunctions.RemainingTimeSeconds(skill.RemainingCooldownSeconds));
                     }
                     else
                     {
@@ -326,23 +441,28 @@ namespace DigitalWorldOnline.Commons.Packets.GameServer
                 WriteByte(0);
             }
 
-            var cashBuffs = character.ActiveSkill.Where(x =>
-                    x.Type == Enums.ClientEnums.TamerSkillTypeEnum.Cash && x.SkillId > 0 && x.RemainingMinutes > 0)
+            var cashSkills = character.ActiveSkill
+                .Where(x =>
+                    x.Type == Enums.ClientEnums.TamerSkillTypeEnum.Cash &&
+                    x.SkillId > 0 &&
+                    x.RemainingMinutes > 0)
                 .ToList();
 
-            if (cashBuffs.Any())
+            if (cashSkills.Any())
             {
-                WriteByte((byte)cashBuffs.Count);
-                foreach (var buff in cashBuffs)
-                {
-                    if (buff.RemainingMinutes > 0)
-                    {
-                        WriteInt(buff.SkillId);
+                WriteByte((byte)cashSkills.Count);
 
-                        WriteInt(UtilitiesFunctions.RemainingTimeMinutes(buff.RemainingMinutes));
-                        if (buff.RemainingCooldownSeconds > 0)
+                foreach (var skill in cashSkills)
+                {
+                    if (skill.RemainingMinutes > 0)
+                    {
+                        WriteInt(skill.SkillId);
+
+                        WriteInt(UtilitiesFunctions.RemainingTimeMinutes(skill.RemainingMinutes));
+
+                        if (skill.RemainingCooldownSeconds > 0)
                         {
-                            WriteInt(UtilitiesFunctions.RemainingTimeSeconds(buff.RemainingCooldownSeconds));
+                            WriteInt(UtilitiesFunctions.RemainingTimeSeconds(skill.RemainingCooldownSeconds));
                         }
                         else
                         {
@@ -361,27 +481,6 @@ namespace DigitalWorldOnline.Commons.Packets.GameServer
             {
                 WriteByte(0);
             }
-
-            WriteByte(0); //bloqueio de chat (se passar 1, informar a duração)
-            //WriteInt(60);//Duração block chat em segundos 
-            //Obs.: Passar 0 posteriormente não remove o valor da duração passado anteriormente.
-            WriteByte(0); //master match (1 = equipe A, 2 = equipe B)
-
-            // TODO: Encyclopedia deckbuff the most OP is 1021, this is the DeckGroupID in xml
-            if (character.DeckBuffId == null)
-            {
-                WriteByte(0);
-            }
-            else
-            {
-                WriteInt((int)character.DeckBuffId);
-            }
-
-            WriteByte(0); //Megaphone ban (1 = block)
-
-            WriteInt(0);
-
-            WriteBytes(new byte[29]);
         }
     }
 }
